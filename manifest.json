@@ -1,0 +1,10 @@
+{
+  "id": "cinematic-bookshelf",
+  "name": "Cinematic Bookshelf",
+  "version": "1.0.0",
+  "minAppVersion": "1.4.0",
+  "description": "Render your book notes as animated bookshelf spines with Cozy and Cybersigilism themes. Powered by anime.js + Three.js.",
+  "author": "Cinematic Bookshelf",
+  "authorUrl": "",
+  "isDesktopOnly": false
+}
