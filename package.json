@@ -1,0 +1,32 @@
+{
+  "name": "cinematic-bookshelf",
+  "version": "1.0.0",
+  "description": "Render your book notes as animated bookshelf spines. Powered by anime.js and Three.js.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "obsidian",
+    "obsidian-plugin",
+    "bookshelf",
+    "books",
+    "animation"
+  ],
+  "author": "Cinematic Bookshelf",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/three": "^0.160.0",
+    "builtin-modules": "^3.3.0",
+    "esbuild": "^0.20.0",
+    "obsidian": "^1.5.0",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "animejs": "3.2.2",
+    "three": "^0.160.0"
+  }
+}
