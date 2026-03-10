@@ -1,0 +1,5 @@
+node_modules/
+
+# Build output is committed so the plugin can be installed without a build
+# step, but the sourcemap is not.
+*.js.map

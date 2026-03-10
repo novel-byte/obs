@@ -1,0 +1,307 @@
+/* ─── Cinematic Bookshelf ───────────────────────────────────────────────────
+   Styles for the bookshelf view. Colours are driven by CSS variables so a
+   single block can retheme the whole shelf.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.cinematic-bookshelf-container {
+    --shelf-wood: #8b5a2b;
+    --shelf-wood-dark: #6b4420;
+    --shelf-wood-light: #a9713a;
+    --shelf-floor: #4a2f16;
+    --shelf-text: #f4ead9;
+    --shelf-muted: #c9b79c;
+    --shelf-accent: #d9a441;
+    --shelf-gap: 6px;
+    --shelf-radius: 3px;
+
+    height: 100%;
+    overflow: auto;
+    padding: 0 12px 24px;
+}
+
+/* ─── Cybersigilism theme ──────────────────────────────────────────────────── */
+
+.cinematic-bookshelf.cybersigilism {
+    --shelf-wood: #1a1a22;
+    --shelf-wood-dark: #101017;
+    --shelf-wood-light: #2a2a38;
+    --shelf-floor: #08080c;
+    --shelf-text: #e6f7ff;
+    --shelf-muted: #7d94a8;
+    --shelf-accent: #00e5ff;
+    --shelf-gap: 5px;
+    --shelf-radius: 2px;
+}
+
+/* ─── Header ───────────────────────────────────────────────────────────────── */
+
+.bookshelf-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 4px 12px;
+    border-bottom: 1px solid var(--shelf-wood-dark);
+    margin-bottom: 20px;
+}
+
+.bookshelf-header h2 {
+    margin: 0;
+    font-size: 1.15em;
+    font-weight: 600;
+    color: var(--shelf-text);
+    letter-spacing: 0.02em;
+}
+
+.book-count {
+    font-size: 0.85em;
+    color: var(--shelf-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ─── Shelf and floor ──────────────────────────────────────────────────────── */
+
+.shelf-row {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--shelf-gap);
+    min-height: 260px;
+    padding: 0 4px;
+}
+
+.shelf-floor {
+    height: 10px;
+    margin-top: -1px;
+    border-radius: 2px;
+    background: linear-gradient(
+        to bottom,
+        var(--shelf-wood-light),
+        var(--shelf-wood-dark)
+    );
+    box-shadow:
+        0 2px 6px rgb(0 0 0 / 35%),
+        inset 0 1px 0 rgb(255 255 255 / 12%);
+}
+
+/* ─── Book spine ───────────────────────────────────────────────────────────── */
+
+.book {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    width: 46px;
+    min-width: 46px;
+    padding: 0;
+    border-radius: var(--shelf-radius) var(--shelf-radius) 1px 1px;
+    background: linear-gradient(
+        to right,
+        var(--book-color-dark),
+        var(--book-color) 42%,
+        var(--book-color-light) 78%,
+        var(--book-color-dark)
+    );
+    box-shadow:
+        0 3px 8px rgb(0 0 0 / 30%),
+        inset -1px 0 0 rgb(0 0 0 / 22%),
+        inset 1px 0 0 rgb(255 255 255 / 14%);
+    cursor: pointer;
+    outline: none;
+    transition:
+        transform 220ms ease-out,
+        box-shadow 220ms ease-out;
+    will-change: transform;
+}
+
+.book:hover {
+    box-shadow:
+        0 8px 18px rgb(0 0 0 / 40%),
+        inset -1px 0 0 rgb(0 0 0 / 22%),
+        inset 1px 0 0 rgb(255 255 255 / 16%);
+}
+
+.book:focus-visible {
+    box-shadow:
+        0 0 0 2px var(--shelf-accent),
+        0 6px 14px rgb(0 0 0 / 38%);
+}
+
+/* A slightly uneven lean, so the shelf does not look mechanical. */
+.book:nth-child(3n) {
+    transform: rotate(-1.2deg);
+}
+
+.book:nth-child(4n) {
+    transform: rotate(0.9deg);
+}
+
+.book-spine-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    padding: 10px 4px 12px;
+    text-align: center;
+    overflow: hidden;
+}
+
+.book-title {
+    font-size: 0.62em;
+    font-weight: 600;
+    line-height: 1.25;
+    color: var(--shelf-text);
+    text-shadow: 0 1px 1px rgb(0 0 0 / 45%);
+    overflow-wrap: anywhere;
+    /* Long titles run down the spine rather than being clipped. */
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    max-height: 68%;
+}
+
+.book-author {
+    font-size: 0.5em;
+    line-height: 1.2;
+    color: var(--shelf-muted);
+    text-shadow: 0 1px 1px rgb(0 0 0 / 40%);
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    max-height: 34%;
+    opacity: 0.85;
+}
+
+.book-rating {
+    display: flex;
+    gap: 2px;
+}
+
+.rating-dot {
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: rgb(255 255 255 / 22%);
+}
+
+.rating-dot.filled {
+    background: var(--shelf-accent);
+    box-shadow: 0 0 3px var(--shelf-accent);
+}
+
+/* ─── Status badge ─────────────────────────────────────────────────────────── */
+
+.status-badge {
+    position: absolute;
+    top: 5px;
+    left: 50%;
+    width: 5px;
+    height: 5px;
+    margin-left: -2.5px;
+    border-radius: 50%;
+    background: var(--shelf-muted);
+}
+
+.book.is-reading .status-badge {
+    background: var(--shelf-accent);
+    box-shadow: 0 0 5px var(--shelf-accent);
+}
+
+.book.is-completed .status-badge {
+    background: #6fcf7f;
+    box-shadow: 0 0 5px #6fcf7f;
+}
+
+/* ─── Progress strip ────────────────────────────────────────────────────────── */
+
+.progress-strip {
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 3px;
+    background: rgb(0 0 0 / 28%);
+}
+
+.progress-strip::after {
+    content: "";
+    display: block;
+    width: var(--progress, 0%);
+    height: 100%;
+    background: var(--shelf-accent);
+    box-shadow: 0 0 4px var(--shelf-accent);
+}
+
+/* ─── Cybersigilism extras ─────────────────────────────────────────────────── */
+
+.hover-glow {
+    box-shadow:
+        0 0 12px var(--shelf-accent),
+        0 8px 20px rgb(0 0 0 / 45%);
+}
+
+.three-bg-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.9;
+}
+
+.cinematic-bookshelf {
+    position: relative;
+    isolation: isolate;
+}
+
+.cinematic-bookshelf > *:not(.three-bg-canvas) {
+    position: relative;
+    z-index: 1;
+}
+
+/* ─── Empty state ──────────────────────────────────────────────────────────── */
+
+.bookshelf-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 56px 20px;
+    text-align: center;
+    color: var(--shelf-muted);
+}
+
+.empty-icon {
+    font-size: 2.4em;
+    opacity: 0.55;
+}
+
+.bookshelf-empty h3 {
+    margin: 0;
+    font-size: 1em;
+    color: var(--shelf-text);
+}
+
+.bookshelf-empty p {
+    margin: 0;
+    max-width: 30em;
+    font-size: 0.85em;
+    line-height: 1.5;
+}
+
+.empty-hint {
+    display: block;
+    margin-top: 10px;
+    padding: 10px 14px;
+    border: 1px solid var(--shelf-wood-dark);
+    border-radius: 4px;
+    background: rgb(0 0 0 / 22%);
+    color: var(--shelf-muted);
+    font-size: 0.75em;
+    line-height: 1.7;
+    text-align: left;
+}
+
+/* ─── Reduced motion ───────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+    .book {
+        transition: none;
+    }
+}
