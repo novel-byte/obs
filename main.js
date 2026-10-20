@@ -35,7 +35,18 @@ var DEFAULT_SETTINGS = {
   theme: "cozy",
   folderPath: "Books",
   tag: "book",
-  animationsEnabled: true
+  animationsEnabled: true,
+  sortOrder: "title",
+  filter: "all",
+  groupBySeries: true,
+  statuses: [
+    { name: "reading", color: "#d9a441" },
+    { name: "completed", color: "#6fcf7f" },
+    { name: "paused", color: "#8b9dc3" },
+    { name: "abandoned", color: "#c97f7f" }
+  ],
+  glassEnabled: true,
+  followObsidianTheme: true
 };
 var BookshelfSettingTab = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
@@ -61,7 +72,7 @@ var BookshelfSettingTab = class extends import_obsidian.PluginSettingTab {
       })
     );
     new import_obsidian.Setting(containerEl).setName("\u{1F4C1} Books folder").setDesc(
-      "Path to the folder containing your book notes (relative to vault root). Example: Books or Reading/Library"
+      "Path to the folder containing your book notes, relative to the vault root. Example: Books or Reading/Library. Leave empty to use the tag alone."
     ).addText(
       (text) => text.setPlaceholder("Books").setValue(this.plugin.settings.folderPath).onChange(async (value) => {
         this.plugin.settings.folderPath = value.trim();
@@ -70,12 +81,53 @@ var BookshelfSettingTab = class extends import_obsidian.PluginSettingTab {
       })
     );
     new import_obsidian.Setting(containerEl).setName("\u{1F3F7}\uFE0F Book tag").setDesc(
-      "Tag used to identify book notes (without #). Notes with this tag anywhere in the vault will appear on the shelf."
+      "Tag used to identify a book note (without #). Notes with this tag anywhere in the vault will appear on the shelf."
     ).addText(
       (text) => text.setPlaceholder("book").setValue(this.plugin.settings.tag).onChange(async (value) => {
         this.plugin.settings.tag = value.trim().replace(/^#/, "");
         await this.plugin.saveSettings();
         this.plugin.debouncedRefresh();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("\u{1F522} Sort by").setDesc("The order books appear along the shelf.").addDropdown(
+      (drop) => drop.addOption("title", "Title").addOption("author", "Author").addOption("rating", "Rating").addOption("progress", "Progress").addOption("added", "Date added").setValue(this.plugin.settings.sortOrder).onChange(async (value) => {
+        this.plugin.settings.sortOrder = value;
+        await this.plugin.saveSettings();
+        this.plugin.refreshView();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("\u{1F50D} Show").setDesc("Which books are on the shelf.").addDropdown(
+      (drop) => drop.addOption("all", "All books").addOption("reading", "Reading").addOption("completed", "Completed").addOption("unrated", "Unrated").setValue(this.plugin.settings.filter).onChange(async (value) => {
+        this.plugin.settings.filter = value;
+        await this.plugin.saveSettings();
+        this.plugin.refreshView();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("\u{1F4DA} Group by series").setDesc(
+      "Give books sharing a `series` frontmatter their own row, in the order the `position` field gives."
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.groupBySeries).onChange(async (value) => {
+        this.plugin.settings.groupBySeries = value;
+        await this.plugin.saveSettings();
+        this.plugin.refreshView();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("\u{1FA9F} Frosted glass").setDesc(
+      "Draw the spines as frosted panels over the background. Turn off for a solid shelf."
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.glassEnabled).onChange(async (value) => {
+        this.plugin.settings.glassEnabled = value;
+        await this.plugin.saveSettings();
+        this.plugin.refreshView();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("\u{1F39B}\uFE0F Follow the Obsidian theme").setDesc(
+      "Take the base colours from Obsidian's own theme, so the shelf fits whichever theme you use."
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.followObsidianTheme).onChange(async (value) => {
+        this.plugin.settings.followObsidianTheme = value;
+        await this.plugin.saveSettings();
+        this.plugin.refreshView();
       })
     );
     new import_obsidian.Setting(containerEl).setName("\u2728 Enable animations").setDesc(
@@ -87,11 +139,55 @@ var BookshelfSettingTab = class extends import_obsidian.PluginSettingTab {
         this.plugin.refreshView();
       })
     );
+    containerEl.createEl("h3", { text: "Statuses" });
+    containerEl.createEl("p", {
+      text: "The statuses a note can carry, and the colour each is drawn in.",
+      cls: "setting-item-description"
+    });
+    const statusList = containerEl.createDiv({ cls: "status-settings" });
+    const renderStatuses = () => {
+      statusList.empty();
+      this.plugin.settings.statuses.forEach((status, index) => {
+        const setting = new import_obsidian.Setting(statusList).setName(status.name || "unnamed").addText(
+          (text) => text.setPlaceholder("status").setValue(status.name).onChange(async (value) => {
+            this.plugin.settings.statuses[index].name = value.trim();
+            await this.plugin.saveSettings();
+            this.plugin.refreshView();
+          })
+        ).addColorPicker(
+          (picker) => picker.setValue(status.color).onChange(async (value) => {
+            this.plugin.settings.statuses[index].color = value;
+            await this.plugin.saveSettings();
+            this.plugin.refreshView();
+          })
+        ).addExtraButton(
+          (extra) => extra.setIcon("trash").setTooltip("Remove").onClick(async () => {
+            this.plugin.settings.statuses.splice(index, 1);
+            await this.plugin.saveSettings();
+            renderStatuses();
+            this.plugin.refreshView();
+          })
+        );
+        setting.settingEl.addClass("status-setting");
+      });
+      new import_obsidian.Setting(statusList).addButton(
+        (button) => button.setButtonText("Add a status").setCta().onClick(async () => {
+          this.plugin.settings.statuses.push({
+            name: "new status",
+            color: "#8b9dc3"
+          });
+          await this.plugin.saveSettings();
+          renderStatuses();
+          this.plugin.refreshView();
+        })
+      );
+    };
+    renderStatuses();
     containerEl.createEl("hr");
     const footer = containerEl.createEl("p", {
       cls: "setting-item-description"
     });
-    footer.innerHTML = "Add <code>title</code>, <code>author</code>, <code>status</code>, <code>rating</code>, <code>color</code>, and <code>progress</code> YAML frontmatter to your book notes for full shelf metadata.";
+    footer.innerHTML = "Add <code>title</code>, <code>author</code>, <code>status</code>, <code>rating</code>, <code>color</code>, <code>progress</code>, <code>series</code> and <code>position</code> YAML frontmatter to your book notes for full shelf metadata.";
   }
 };
 
@@ -20921,11 +21017,115 @@ if (typeof window !== "undefined") {
   }
 }
 
+// colour.ts
+function hslToString({ h, s, l }) {
+  return `hsl(${Math.round(h)}, ${Math.round(s)}%, ${Math.round(l)}%)`;
+}
+function hexToHsl(hex) {
+  const cleaned = hex.trim().replace(/^#/, "");
+  if (!/^[0-9a-f]{3}$|^[0-9a-f]{6}$/i.test(cleaned))
+    return null;
+  const full = cleaned.length === 3 ? cleaned.split("").map((c) => c + c).join("") : cleaned;
+  const r = parseInt(full.slice(0, 2), 16) / 255;
+  const g = parseInt(full.slice(2, 4), 16) / 255;
+  const b = parseInt(full.slice(4, 6), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  const l = (max + min) / 2;
+  let h = 0;
+  let s = 0;
+  if (delta !== 0) {
+    s = delta / (1 - Math.abs(2 * l - 1));
+    if (max === r) {
+      h = 60 * ((g - b) / delta % 6);
+    } else if (max === g) {
+      h = 60 * ((b - r) / delta + 2);
+    } else {
+      h = 60 * ((r - g) / delta + 4);
+    }
+  }
+  if (h < 0)
+    h += 360;
+  return { h, s: s * 100, l: l * 100 };
+}
+function rgbToHsl(value) {
+  const match = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i.exec(value);
+  if (!match)
+    return null;
+  const r = Number(match[1]) / 255;
+  const g = Number(match[2]) / 255;
+  const b = Number(match[3]) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  const l = (max + min) / 2;
+  let h = 0;
+  let s = 0;
+  if (delta !== 0) {
+    s = delta / (1 - Math.abs(2 * l - 1));
+    if (max === r) {
+      h = 60 * ((g - b) / delta % 6);
+    } else if (max === g) {
+      h = 60 * ((b - r) / delta + 2);
+    } else {
+      h = 60 * ((r - g) / delta + 4);
+    }
+  }
+  if (h < 0)
+    h += 360;
+  return { h, s: s * 100, l: l * 100 };
+}
+function parseColor(value) {
+  const trimmed = value.trim();
+  if (trimmed === "")
+    return null;
+  if (trimmed.startsWith("#"))
+    return hexToHsl(trimmed);
+  if (/^rgba?\(/i.test(trimmed))
+    return rgbToHsl(trimmed);
+  if (/^hsla?\(/i.test(trimmed)) {
+    const match = /hsla?\(\s*([\d.]+)(?:deg)?[,\s]+([\d.]+)%[,\s]+([\d.]+)%/i.exec(
+      trimmed
+    );
+    if (!match)
+      return null;
+    return {
+      h: Number(match[1]),
+      s: Number(match[2]),
+      l: Number(match[3])
+    };
+  }
+  if (typeof document === "undefined")
+    return null;
+  const probe = document.createElement("span");
+  probe.style.color = trimmed;
+  if (probe.style.color === "")
+    return null;
+  document.body.appendChild(probe);
+  const computed = window.getComputedStyle(probe).color;
+  probe.remove();
+  return rgbToHsl(computed);
+}
+function shiftLightness(color, delta) {
+  return { ...color, l: Math.min(100, Math.max(0, color.l + delta)) };
+}
+function hashCode(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = Math.imul(31, hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
 // bookshelfView.ts
 var VIEW_TYPE_BOOKSHELF = "cinematic-bookshelf-view";
+var STATUS_FALLBACK = "#8b9dc3";
 var BookshelfView = class extends import_obsidian2.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
+    this.plugin = plugin;
     // Three.js state
     this.threeScene = null;
     this.threeRenderer = null;
@@ -20935,7 +21135,14 @@ var BookshelfView = class extends import_obsidian2.ItemView {
     this.entranceTimeline = null;
     // ResizeObserver for three.js canvas
     this.resizeObserver = null;
-    this.plugin = plugin;
+    // Search term, held outside the DOM so it survives a re-render
+    this.searchTerm = "";
+    this.threeScene = null;
+    this.threeRenderer = null;
+    this.threeCamera = null;
+    this.threeAnimFrame = null;
+    this.entranceTimeline = null;
+    this.resizeObserver = null;
   }
   getViewType() {
     return VIEW_TYPE_BOOKSHELF;
@@ -20966,38 +21173,37 @@ var BookshelfView = class extends import_obsidian2.ItemView {
     container.empty();
     container.addClass("cinematic-bookshelf-container");
     const { theme, animationsEnabled } = this.plugin.settings;
-    const reducedMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)"
-    ).matches;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const shouldAnimate = animationsEnabled && !reducedMotion;
-    const shelf = container.createDiv({
-      cls: `cinematic-bookshelf ${theme}`
-    });
-    const books = this.getBooks();
-    if (books.length === 0) {
-      this.renderEmptyState(shelf);
-      return;
-    }
-    const header = shelf.createDiv({ cls: "bookshelf-header" });
-    header.createEl("h2", { text: "\u{1F4DA} Cinematic Bookshelf" });
-    header.createEl("span", {
-      cls: "book-count",
-      text: `${books.length} volume${books.length !== 1 ? "s" : ""}`
-    });
+    const shelf = container.createDiv({ cls: `cinematic-bookshelf ${theme}` });
     this.disposeThree();
     if (theme === "cybersigilism") {
       this.initThreeBackground(shelf);
     }
-    const shelfRow = shelf.createDiv({ cls: "shelf-row" });
-    const fragment2 = document.createDocumentFragment();
+    const allBooks = this.getBooks();
+    const visible = this.applyFilter(allBooks);
+    const rows = this.buildRows(visible);
+    this.renderToolbar(shelf, allBooks.length, visible.length);
+    if (visible.length === 0) {
+      this.renderEmptyState(shelf, allBooks.length);
+      return;
+    }
     const bookEls = [];
-    books.forEach((book, index) => {
-      const el = this.buildBookSpine(book, shouldAnimate, index);
-      bookEls.push(el);
-      fragment2.appendChild(el);
-    });
-    shelfRow.appendChild(fragment2);
-    shelf.createDiv({ cls: "shelf-floor" });
+    for (const row of rows) {
+      if (row.series !== void 0) {
+        const label = shelf.createDiv({ cls: "shelf-row-label" });
+        label.createEl("span", { text: row.series });
+      }
+      const shelfRow = shelf.createDiv({ cls: "shelf-row" });
+      const fragment2 = document.createDocumentFragment();
+      row.books.forEach((book, index) => {
+        const el = this.buildBookSpine(book, shouldAnimate, index);
+        bookEls.push(el);
+        fragment2.appendChild(el);
+      });
+      shelfRow.appendChild(fragment2);
+      shelfRow.createDiv({ cls: "shelf-floor" });
+    }
     if (shouldAnimate) {
       requestAnimationFrame(() => {
         this.triggerEntranceAnimation(bookEls);
@@ -21023,16 +21229,99 @@ var BookshelfView = class extends import_obsidian2.ItemView {
       this.resizeObserver.observe(shelf);
     }
   }
+  // ─── Toolbar ────────────────────────────────────────────────────────────────
+  renderToolbar(shelf, total, shown) {
+    const { filter, sortOrder } = this.plugin.settings;
+    const header = shelf.createDiv({ cls: "bookshelf-header" });
+    const titleGroup = header.createDiv({ cls: "header-titles" });
+    titleGroup.createEl("h2", { text: "\u{1F4DA} Cinematic Bookshelf" });
+    titleGroup.createEl("span", {
+      cls: "book-count",
+      text: shown === total ? `${total} volume${total === 1 ? "" : "s"}` : `${shown} of ${total} volume${total === 1 ? "" : "s"}`
+    });
+    const controls = header.createDiv({ cls: "header-controls" });
+    const searchWrap = controls.createDiv({ cls: "search-wrap" });
+    searchWrap.createEl("span", { cls: "search-icon", text: "\u{1F50D}" });
+    const search = searchWrap.createEl("input", {
+      cls: "shelf-search",
+      attr: {
+        type: "search",
+        placeholder: "Search titles and authors",
+        "aria-label": "Search books"
+      }
+    });
+    search.value = this.searchTerm;
+    search.addEventListener("input", () => {
+      this.searchTerm = search.value;
+      this.render();
+    });
+    search.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        this.searchTerm = "";
+        this.render();
+      }
+      e.stopPropagation();
+    });
+    const chips = controls.createDiv({ cls: "filter-chips" });
+    const filters = [
+      { value: "all", label: "All" },
+      { value: "reading", label: "Reading" },
+      { value: "completed", label: "Completed" },
+      { value: "unrated", label: "Unrated" }
+    ];
+    for (const option of filters) {
+      const chip = chips.createEl("button", {
+        cls: "filter-chip",
+        text: option.label,
+        attr: { type: "button", "aria-pressed": String(filter === option.value) }
+      });
+      if (filter === option.value)
+        chip.addClass("is-active");
+      chip.addEventListener("click", () => {
+        this.plugin.settings.filter = option.value;
+        void this.plugin.saveSettings();
+        this.render();
+      });
+    }
+    const sortWrap = controls.createDiv({ cls: "sort-wrap" });
+    sortWrap.createEl("span", { cls: "sort-label", text: "Sort" });
+    const sort = sortWrap.createEl("select", {
+      cls: "shelf-sort",
+      attr: { "aria-label": "Sort books" }
+    });
+    const sorts = [
+      { value: "title", label: "Title" },
+      { value: "author", label: "Author" },
+      { value: "rating", label: "Rating" },
+      { value: "progress", label: "Progress" },
+      { value: "added", label: "Date added" }
+    ];
+    for (const option of sorts) {
+      sort.createEl("option", {
+        text: option.label,
+        value: option.value
+      });
+    }
+    sort.value = sortOrder;
+    sort.addEventListener("change", () => {
+      this.plugin.settings.sortOrder = sort.value;
+      void this.plugin.saveSettings();
+      this.render();
+    });
+  }
   // ─── Empty State ─────────────────────────────────────────────────────────────
-  renderEmptyState(shelf) {
+  renderEmptyState(shelf, total) {
     const empty = shelf.createDiv({ cls: "bookshelf-empty" });
     empty.createEl("div", { cls: "empty-icon", text: "\u{1F4DA}" });
-    empty.createEl("h3", { text: "Your shelf is empty" });
+    empty.createEl("h3", {
+      text: total === 0 ? "Your shelf is empty" : "Nothing matches"
+    });
+    const { folderPath, tag } = this.plugin.settings;
     empty.createEl("p", {
-      text: `Create notes in your "${this.plugin.settings.folderPath}" folder or tag them with #${this.plugin.settings.tag} to populate your bookshelf.`
+      text: total === 0 ? `Create notes in your "${folderPath}" folder or tag them with #${tag} to populate your bookshelf.` : `${total} book${total === 1 ? " is" : "s are"} on the shelf, but none match the current filter and search.`
     });
     const hint = empty.createEl("code", { cls: "empty-hint" });
-    hint.innerHTML = `---<br>title: "My Book"<br>author: "Author Name"<br>status: reading<br>progress: 45<br>---`;
+    hint.innerHTML = `---<br>title: "My Book"<br>author: "Author Name"<br>status: reading<br>progress: 45<br>series: "The Expanse"<br>position: 2<br>---`;
   }
   // ─── Book Data Pipeline ──────────────────────────────────────────────────────
   getBooks() {
@@ -21042,19 +21331,20 @@ var BookshelfView = class extends import_obsidian2.ItemView {
     return vault.getMarkdownFiles().filter((file) => {
       var _a, _b, _c;
       const fileFolderPath = (0, import_obsidian2.normalizePath)(file.path);
-      const inFolder = fileFolderPath.startsWith(normalizedFolder + "/") || fileFolderPath === normalizedFolder;
+      const inFolder = normalizedFolder === "" ? false : fileFolderPath.startsWith(normalizedFolder + "/") || fileFolderPath === normalizedFolder;
       const cache2 = metadataCache.getFileCache(file);
-      const fmTags = (_b = (_a = cache2 == null ? void 0 : cache2.frontmatter) == null ? void 0 : _a.tags) != null ? _b : [];
-      const normalizedFmTags = fmTags.map(
+      const normalizedFmTags = ((_b = (_a = cache2 == null ? void 0 : cache2.frontmatter) == null ? void 0 : _a.tags) != null ? _b : []).map(
         (t) => t.replace(/^#/, "")
       );
-      const hasInlineTag = (_c = cache2 == null ? void 0 : cache2.tags) == null ? void 0 : _c.some(
+      const hasInlineTag = ((_c = cache2 == null ? void 0 : cache2.tags) != null ? _c : []).some(
         (t) => t.tag === `#${tag}` || t.tag === tag
       );
       const hasFrontmatterTag = normalizedFmTags.includes(tag);
+      if (tag === "")
+        return inFolder;
       return inFolder || hasInlineTag || hasFrontmatterTag;
     }).map((file) => {
-      var _a;
+      var _a, _b, _c;
       const cache2 = metadataCache.getFileCache(file);
       const fm = (_a = cache2 == null ? void 0 : cache2.frontmatter) != null ? _a : {};
       const progress = typeof fm.progress === "number" ? Math.min(100, Math.max(0, fm.progress)) : void 0;
@@ -21065,14 +21355,128 @@ var BookshelfView = class extends import_obsidian2.ItemView {
         status: fm.status,
         rating: typeof fm.rating === "number" ? Math.min(5, Math.max(1, fm.rating)) : void 0,
         color: fm.color,
-        progress
+        progress,
+        series: fm.series,
+        position: typeof fm.position === "number" ? fm.position : void 0,
+        added: (_c = (_b = file.stat) == null ? void 0 : _b.ctime) != null ? _c : 0
       };
-    }).sort((a, b) => a.title.localeCompare(b.title));
+    });
+  }
+  /** Apply the search term and the filter chip. */
+  applyFilter(books) {
+    const { filter } = this.plugin.settings;
+    const term = this.searchTerm.trim().toLowerCase();
+    let result = books;
+    if (term !== "") {
+      result = result.filter(
+        (book) => {
+          var _a, _b;
+          return book.title.toLowerCase().includes(term) || ((_a = book.author) != null ? _a : "").toLowerCase().includes(term) || ((_b = book.series) != null ? _b : "").toLowerCase().includes(term);
+        }
+      );
+    }
+    switch (filter) {
+      case "reading":
+        result = result.filter((book) => book.status === "reading");
+        break;
+      case "completed":
+        result = result.filter((book) => book.status === "completed");
+        break;
+      case "unrated":
+        result = result.filter((book) => book.rating === void 0);
+        break;
+      case "all":
+      default:
+        break;
+    }
+    return this.sortBooks(result);
+  }
+  sortBooks(books) {
+    const { sortOrder } = this.plugin.settings;
+    const sorted = [...books];
+    switch (sortOrder) {
+      case "author":
+        sorted.sort((a, b) => {
+          if (!a.author && !b.author)
+            return a.title.localeCompare(b.title);
+          if (!a.author)
+            return 1;
+          if (!b.author)
+            return -1;
+          return a.author.localeCompare(b.author) || a.title.localeCompare(b.title);
+        });
+        break;
+      case "rating":
+        sorted.sort(
+          (a, b) => {
+            var _a, _b;
+            return ((_a = b.rating) != null ? _a : 0) - ((_b = a.rating) != null ? _b : 0) || a.title.localeCompare(b.title);
+          }
+        );
+        break;
+      case "progress":
+        sorted.sort(
+          (a, b) => {
+            var _a, _b;
+            return ((_a = b.progress) != null ? _a : -1) - ((_b = a.progress) != null ? _b : -1) || a.title.localeCompare(b.title);
+          }
+        );
+        break;
+      case "added":
+        sorted.sort((a, b) => b.added - a.added);
+        break;
+      case "title":
+      default:
+        sorted.sort((a, b) => a.title.localeCompare(b.title));
+        break;
+    }
+    return sorted;
+  }
+  /**
+   * Group the books into rows. Books sharing a `series` get their own row
+   * and are ordered by their `position`; everything else shares the first
+   * row.
+   */
+  buildRows(books) {
+    var _a;
+    const { groupBySeries } = this.plugin.settings;
+    if (!groupBySeries) {
+      return [{ books }];
+    }
+    const series = /* @__PURE__ */ new Map();
+    const loose = [];
+    for (const book of books) {
+      if (book.series) {
+        const group = (_a = series.get(book.series)) != null ? _a : [];
+        group.push(book);
+        series.set(book.series, group);
+      } else {
+        loose.push(book);
+      }
+    }
+    const rows = [];
+    if (loose.length > 0) {
+      rows.push({ books: loose });
+    }
+    for (const [name, group] of [...series.entries()].sort(
+      (a, b) => a[0].localeCompare(b[0])
+    )) {
+      rows.push({
+        series: name,
+        books: group.sort(
+          (a, b) => {
+            var _a2, _b;
+            return ((_a2 = a.position) != null ? _a2 : Number.MAX_SAFE_INTEGER) - ((_b = b.position) != null ? _b : Number.MAX_SAFE_INTEGER) || a.title.localeCompare(b.title);
+          }
+        )
+      });
+    }
+    return rows;
   }
   // ─── Book Spine Builder ───────────────────────────────────────────────────────
   buildBookSpine(book, animated, index) {
     const { theme } = this.plugin.settings;
-    const spineColor = book.color || this.generateColor(book.title, theme);
+    const spineColor = this.resolveColor(book, theme);
     const isReading = book.status === "reading";
     const isCompleted = book.status === "completed";
     const bookEl = document.createElement("div");
@@ -21083,20 +21487,28 @@ var BookshelfView = class extends import_obsidian2.ItemView {
     ].filter(Boolean).join(" ");
     bookEl.dataset.path = book.file.path;
     bookEl.dataset.index = String(index);
-    bookEl.style.setProperty("--book-color", spineColor);
-    bookEl.style.setProperty("--book-color-dark", this.shiftLightness(spineColor, -18));
-    bookEl.style.setProperty("--book-color-light", this.shiftLightness(spineColor, 15));
+    bookEl.style.setProperty("--book-color", spineColor.base);
+    bookEl.style.setProperty("--book-color-dark", spineColor.dark);
+    bookEl.style.setProperty("--book-color-light", spineColor.light);
     bookEl.style.setProperty("--book-index", String(index));
     if (animated) {
       bookEl.style.opacity = "0";
       bookEl.style.transform = "translateY(22px)";
     }
-    const heightVariant = 160 + this.hashCode(book.title) % 80;
+    const heightVariant = 160 + hashCode(book.title) % 80;
     bookEl.style.height = `${heightVariant}px`;
+    const tooltip = [
+      book.title,
+      book.author ? `by ${book.author}` : null,
+      book.status ? `\xB7 ${book.status}` : null,
+      book.series ? `\xB7 ${book.series}${book.position ? ` #${book.position}` : ""}` : null
+    ].filter(Boolean).join(" ");
+    bookEl.setAttribute("title", tooltip);
     if (book.progress !== void 0 && book.progress > 0) {
       const strip = document.createElement("div");
       strip.className = "progress-strip";
       strip.style.setProperty("--progress", `${book.progress}%`);
+      strip.setAttribute("role", "img");
       strip.setAttribute("aria-label", `${book.progress}% read`);
       bookEl.appendChild(strip);
     }
@@ -21115,6 +21527,11 @@ var BookshelfView = class extends import_obsidian2.ItemView {
     if (book.rating !== void 0) {
       const ratingEl = document.createElement("div");
       ratingEl.className = "book-rating";
+      ratingEl.setAttribute("role", "img");
+      ratingEl.setAttribute(
+        "aria-label",
+        `Rated ${book.rating} out of ${book.rating}`
+      );
       for (let i = 1; i <= 5; i++) {
         const dot = document.createElement("span");
         dot.className = `rating-dot${i <= book.rating ? " filled" : ""}`;
@@ -21122,15 +21539,25 @@ var BookshelfView = class extends import_obsidian2.ItemView {
       }
       spine.appendChild(ratingEl);
     }
+    if (book.series && book.position) {
+      const seriesEl = document.createElement("div");
+      seriesEl.className = "book-series";
+      seriesEl.textContent = `#${book.position}`;
+      spine.appendChild(seriesEl);
+    }
     bookEl.appendChild(spine);
     if (book.status) {
       const badge = document.createElement("div");
-      badge.className = `status-badge status-${book.status}`;
+      badge.className = `status-badge status-${this.slugify(book.status)}`;
+      badge.style.setProperty(
+        "--status-color",
+        this.statusColor(book.status)
+      );
       badge.setAttribute("aria-label", `Status: ${book.status}`);
       bookEl.appendChild(badge);
     }
     bookEl.addEventListener("click", () => {
-      this.app.workspace.getLeaf(false).openFile(book.file);
+      this.openBook(book);
     });
     bookEl.setAttribute("tabindex", "0");
     bookEl.setAttribute("role", "button");
@@ -21138,12 +21565,10 @@ var BookshelfView = class extends import_obsidian2.ItemView {
     bookEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        this.app.workspace.getLeaf(false).openFile(book.file);
+        this.openBook(book);
       }
     });
-    const reducedMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)"
-    ).matches;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (!reducedMotion) {
       bookEl.addEventListener("mouseenter", () => {
         if (theme === "cozy") {
@@ -21176,14 +21601,32 @@ var BookshelfView = class extends import_obsidian2.ItemView {
     }
     return bookEl;
   }
+  /**
+   * Open a note in a split leaf, so the shelf stays in view rather than
+   * being replaced by the note.
+   */
+  openBook(book) {
+    const leaf = this.app.workspace.getLeaf("split");
+    void leaf.openFile(book.file);
+  }
+  // ─── Status Helpers ─────────────────────────────────────────────────────────
+  statusColor(status) {
+    var _a;
+    const list = this.plugin.settings.statuses;
+    const match = list.find(
+      (entry) => entry.name.toLowerCase() === status.toLowerCase()
+    );
+    return (_a = match == null ? void 0 : match.color) != null ? _a : STATUS_FALLBACK;
+  }
+  slugify(value) {
+    return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  }
   // ─── Entrance Animation ───────────────────────────────────────────────────────
   triggerEntranceAnimation(bookEls) {
     if (this.entranceTimeline) {
       this.entranceTimeline.pause();
     }
-    this.entranceTimeline = anime_es_default.timeline({
-      easing: "easeOutExpo"
-    });
+    this.entranceTimeline = anime_es_default.timeline({ easing: "easeOutExpo" });
     this.entranceTimeline.add({
       targets: bookEls,
       translateY: [22, 0],
@@ -21192,40 +21635,57 @@ var BookshelfView = class extends import_obsidian2.ItemView {
       delay: anime_es_default.stagger(48, { start: 60 })
     });
   }
-  // ─── Color Utilities ──────────────────────────────────────────────────────────
-  /** Deterministic color from a string, tuned per theme */
+  // ─── Colour Utilities ──────────────────────────────────────────────────────────
+  /**
+   * The colour a spine is drawn in, along with the darker and lighter
+   * variants the gradient uses. A colour given in the note is parsed so
+   * that hex, `rgb()` and named colours all work; a note with no colour
+   * gets a deterministic one from its title.
+   */
+  resolveColor(book, theme) {
+    const generated = this.generateColor(book.title, theme);
+    if (!book.color) {
+      return {
+        base: generated.base,
+        dark: generated.dark,
+        light: generated.light
+      };
+    }
+    const parsed = parseColor(book.color);
+    if (!parsed) {
+      return {
+        base: generated.base,
+        dark: generated.dark,
+        light: generated.light
+      };
+    }
+    return {
+      base: hslToString(parsed),
+      dark: hslToString(shiftLightness(parsed, -18)),
+      light: hslToString(shiftLightness(parsed, 15))
+    };
+  }
+  /** Deterministic colour from a string, tuned per theme */
   generateColor(str, theme) {
-    const hash = this.hashCode(str);
+    const hash = hashCode(str);
+    let h;
+    let s;
+    let l;
     if (theme === "cozy") {
-      const hue = 20 + Math.abs(hash) % 180;
-      const sat = 45 + Math.abs(hash >> 4) % 25;
-      const light = 35 + Math.abs(hash >> 8) % 20;
-      return `hsl(${hue}, ${sat}%, ${light}%)`;
+      h = 20 + hash % 180;
+      s = 45 + (hash >> 4) % 25;
+      l = 35 + (hash >> 8) % 20;
     } else {
-      const hue = Math.abs(hash) % 360;
-      const sat = 70 + Math.abs(hash >> 4) % 25;
-      const light = 40 + Math.abs(hash >> 8) % 20;
-      return `hsl(${hue}, ${sat}%, ${light}%)`;
+      h = hash % 360;
+      s = 70 + (hash >> 4) % 25;
+      l = 40 + (hash >> 8) % 20;
     }
-  }
-  /** Shift the lightness component of an hsl() color string */
-  shiftLightness(color, delta) {
-    return color.replace(
-      /hsl\((\d+\.?\d*),\s*(\d+\.?\d*)%,\s*(\d+\.?\d*)%\)/,
-      (_match, h, s, l) => {
-        const newL = Math.min(100, Math.max(0, parseFloat(l) + delta));
-        return `hsl(${h}, ${s}%, ${newL}%)`;
-      }
-    );
-  }
-  /** Simple deterministic hash from string */
-  hashCode(str) {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      hash = Math.imul(31, hash) + str.charCodeAt(i);
-      hash |= 0;
-    }
-    return hash;
+    const base = { h, s, l };
+    return {
+      base: hslToString(base),
+      dark: hslToString(shiftLightness(base, -18)),
+      light: hslToString(shiftLightness(base, 15))
+    };
   }
   // ─── Three.js Background (Cybersigilism) ─────────────────────────────────────
   initThreeBackground(container) {
@@ -21255,10 +21715,7 @@ var BookshelfView = class extends import_obsidian2.ItemView {
       alphas[i] = Math.random();
     }
     const particleGeo = new BufferGeometry();
-    particleGeo.setAttribute(
-      "position",
-      new BufferAttribute(positions, 3)
-    );
+    particleGeo.setAttribute("position", new BufferAttribute(positions, 3));
     const cyanMat = new PointsMaterial({
       color: 65535,
       size: 0.05,
@@ -21373,12 +21830,17 @@ var CinematicBookshelfPlugin = class extends import_obsidian3.Plugin {
     this.app.workspace.detachLeavesOfType(VIEW_TYPE_BOOKSHELF);
   }
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    var _a;
+    const stored = (_a = await this.loadData()) != null ? _a : {};
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
+    if (!Array.isArray(stored.statuses) || stored.statuses.length === 0) {
+      this.settings.statuses = DEFAULT_SETTINGS.statuses;
+    }
   }
   async saveSettings() {
     await this.saveData(this.settings);
   }
-  // ── View management ──────────────────────────────────────────────────────
+  // ─── View management ──────────────────────────────────────────────────────
   async activateView() {
     const { workspace } = this.app;
     const existing = workspace.getLeavesOfType(VIEW_TYPE_BOOKSHELF);
