@@ -57,7 +57,14 @@ export default class CinematicBookshelfPlugin extends Plugin {
     }
 
     async loadSettings(): Promise<void> {
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+        const stored = ((await this.loadData()) ?? {}) as Partial<BookshelfSettings>;
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
+
+        // The status list is merged rather than replaced, so a status added in
+        // a later version still appears for users who already have settings.
+        if (!Array.isArray(stored.statuses) || stored.statuses.length === 0) {
+            this.settings.statuses = DEFAULT_SETTINGS.statuses;
+        }
     }
 
     async saveSettings(): Promise<void> {

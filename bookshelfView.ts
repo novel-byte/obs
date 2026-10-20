@@ -14,7 +14,8 @@ import {
 } from "three";
 
 import type CinematicBookshelfPlugin from "./main";
-import { type Theme } from "./settings";
+import { type Theme, type SortOrder, type FilterMode, type StatusDefinition } from "./settings";
+import { parseColor, shiftLightness, shiftSaturation, hslToString, hashCode } from "./colour";
 
 export const VIEW_TYPE_BOOKSHELF = "cinematic-bookshelf-view";
 
@@ -26,7 +27,18 @@ interface Book {
     rating?: number;
     color?: string;
     progress?: number;
+    series?: string;
+    position?: number;
+    added: number;
 }
+
+interface ShelfRow {
+    /** The series this row holds, or undefined for the ungrouped row. */
+    series?: string;
+    books: Book[];
+}
+
+const STATUS_FALLBACK = "#8b9dc3";
 
 export class BookshelfView extends ItemView {
     // Three.js state
@@ -41,8 +53,23 @@ export class BookshelfView extends ItemView {
     // ResizeObserver for three.js canvas
     private resizeObserver: ResizeObserver | null = null;
 
+    // Search term, held outside the DOM so it survives a re-render
+    private searchTerm = "";
+
     constructor(leaf: any, private plugin: CinematicBookshelfPlugin) {
         super(leaf);
+
+        // Three.js state
+        this.threeScene = null;
+        this.threeRenderer = null;
+        this.threeCamera = null;
+        this.threeAnimFrame = null;
+
+        // Anime.js timeline reference (for cleanup)
+        this.entranceTimeline = null;
+
+        // ResizeObserver for three.js canvas
+        this.resizeObserver = null;
     }
 
     getViewType(): string {
@@ -85,37 +112,42 @@ export class BookshelfView extends ItemView {
         const shouldAnimate = animationsEnabled && !reducedMotion;
 
         const shelf = container.createDiv({ cls: `cinematic-bookshelf ${theme}` });
-        const books = this.getBooks();
-
-        if (books.length === 0) {
-            this.renderEmptyState(shelf);
-            return;
-        }
-
-        const header = shelf.createDiv({ cls: "bookshelf-header" });
-        header.createEl("h2", { text: "📚 Cinematic Bookshelf" });
-        header.createEl("span", {
-            cls: "book-count",
-            text: `${books.length} volume${books.length !== 1 ? "s" : ""}`,
-        });
 
         this.disposeThree();
         if (theme === "cybersigilism") {
             this.initThreeBackground(shelf);
         }
 
-        const shelfRow = shelf.createDiv({ cls: "shelf-row" });
-        const fragment = document.createDocumentFragment();
+        const allBooks = this.getBooks();
+        const visible = this.applyFilter(allBooks);
+        const rows = this.buildRows(visible);
+
+        this.renderToolbar(shelf, allBooks.length, visible.length);
+
+        if (visible.length === 0) {
+            this.renderEmptyState(shelf, allBooks.length);
+            return;
+        }
+
         const bookEls: HTMLElement[] = [];
 
-        books.forEach((book, index) => {
-            const el = this.buildBookSpine(book, shouldAnimate, index);
-            bookEls.push(el);
-            fragment.appendChild(el);
-        });
-        shelfRow.appendChild(fragment);
+        for (const row of rows) {
+            if (row.series !== undefined) {
+                const label = shelf.createDiv({ cls: "shelf-row-label" });
+                label.createEl("span", { text: row.series });
+            }
 
-        shelf.createDiv({ cls: "shelf-floor" });
+            const shelfRow = shelf.createDiv({ cls: "shelf-row" });
+            const fragment = document.createDocumentFragment();
+
+            row.books.forEach((book, index) => {
+                const el = this.buildBookSpine(book, shouldAnimate, index);
+                bookEls.push(el);
+                fragment.appendChild(el);
+            });
+            shelfRow.appendChild(fragment);
+            shelfRow.createDiv({ cls: "shelf-floor" });
+        }
 
         if (shouldAnimate) {
             requestAnimationFrame(() => {
@@ -143,17 +175,122 @@ export class BookshelfView extends ItemView {
         }
     }
 
+    // ─── Toolbar ────────────────────────────────────────────────────────────────
+
+    private renderToolbar(
+        shelf: HTMLElement,
+        total: number,
+        shown: number,
+    ): void {
+        const { filter, sortOrder } = this.plugin.settings;
+
+        const header = shelf.createDiv({ cls: "bookshelf-header" });
+
+        const titleGroup = header.createDiv({ cls: "header-titles" });
+        titleGroup.createEl("h2", { text: "📚 Cinematic Bookshelf" });
+        titleGroup.createEl("span", {
+            cls: "book-count",
+            text:
+                shown === total
+                    ? `${total} volume${total === 1 ? "" : "s"}`
+                    : `${shown} of ${total} volume${total === 1 ? "" : "s"}`,
+        });
+
+        const controls = header.createDiv({ cls: "header-controls" });
+
+        // ── Search
+        const searchWrap = controls.createDiv({ cls: "search-wrap" });
+        searchWrap.createEl("span", { cls: "search-icon", text: "🔍" });
+        const search = searchWrap.createEl("input", {
+            cls: "shelf-search",
+            attr: {
+                type: "search",
+                placeholder: "Search titles and authors",
+                "aria-label": "Search books",
+            },
+        });
+        search.value = this.searchTerm;
+        search.addEventListener("input", () => {
+            this.searchTerm = search.value;
+            this.render();
+        });
+        search.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") {
+                this.searchTerm = "";
+                this.render();
+            }
+            e.stopPropagation();
+        });
+
+        // ── Filter chips
+        const chips = controls.createDiv({ cls: "filter-chips" });
+        const filters: { value: FilterMode; label: string }[] = [
+            { value: "all", label: "All" },
+            { value: "reading", label: "Reading" },
+            { value: "completed", label: "Completed" },
+            { value: "unrated", label: "Unrated" },
+        ];
+        for (const option of filters) {
+            const chip = chips.createEl("button", {
+                cls: "filter-chip",
+                text: option.label,
+                attr: { type: "button", "aria-pressed": String(filter === option.value) },
+            });
+            if (filter === option.value) chip.addClass("is-active");
+            chip.addEventListener("click", () => {
+                this.plugin.settings.filter = option.value;
+                void this.plugin.saveSettings();
+                this.render();
+            });
+        }
+
+        // ── Sort
+        const sortWrap = controls.createDiv({ cls: "sort-wrap" });
+        sortWrap.createEl("span", { cls: "sort-label", text: "Sort" });
+        const sort = sortWrap.createEl("select", {
+            cls: "shelf-sort",
+            attr: { "aria-label": "Sort books" },
+        });
+        const sorts: { value: SortOrder; label: string }[] = [
+            { value: "title", label: "Title" },
+            { value: "author", label: "Author" },
+            { value: "rating", label: "Rating" },
+            { value: "progress", label: "Progress" },
+            { value: "added", label: "Date added" },
+        ];
+        for (const option of sorts) {
+            sort.createEl("option", {
+                text: option.label,
+                value: option.value,
+            });
+        }
+        sort.value = sortOrder;
+        sort.addEventListener("change", () => {
+            this.plugin.settings.sortOrder = sort.value as SortOrder;
+            void this.plugin.saveSettings();
+            this.render();
+        });
+    }
+
     // ─── Empty State ─────────────────────────────────────────────────────────────
 
-    private renderEmptyState(shelf: HTMLElement): void {
+    private renderEmptyState(shelf: HTMLElement, total: number): void {
         const empty = shelf.createDiv({ cls: "bookshelf-empty" });
         empty.createEl("div", { cls: "empty-icon", text: "📚" });
-        empty.createEl("h3", { text: "Your shelf is empty" });
-        empty.createEl("p", {
-            text: `Create notes in your "${this.plugin.settings.folderPath}" folder or tag them with #${this.plugin.settings.tag} to populate your bookshelf.`,
+        empty.createEl("h3", {
+            text: total === 0 ? "Your shelf is empty" : "Nothing matches",
         });
+
+        const { folderPath, tag } = this.plugin.settings;
+        empty.createEl("p", {
+            text:
+                total === 0
+                    ? `Create notes in your "${folderPath}" folder or tag them with #${tag} to populate your bookshelf.`
+                    : `${total} book${total === 1 ? " is" : "s are"} on the shelf, but none match the current filter and search.`,
+        });
+
         const hint = empty.createEl("code", { cls: "empty-hint" });
-        hint.innerHTML = `---<br>title: "My Book"<br>author: "Author Name"<br>status: reading<br>progress: 45<br>---`;
+        hint.innerHTML = `---<br>title: "My Book"<br>author: "Author Name"<br>status: reading<br>progress: 45<br>series: "The Expanse"<br>position: 2<br>---`;
     }
 
     // ─── Book Data Pipeline ──────────────────────────────────────────────────────
@@ -167,9 +304,13 @@ export class BookshelfView extends ItemView {
             .getMarkdownFiles()
             .filter((file) => {
                 const fileFolderPath = normalizePath(file.path);
+                // An empty folder setting means the folder rule does not apply,
+                // and the tag alone decides.
                 const inFolder =
-                    fileFolderPath.startsWith(normalizedFolder + "/") ||
-                    fileFolderPath === normalizedFolder;
+                    normalizedFolder === ""
+                        ? false
+                        : fileFolderPath.startsWith(normalizedFolder + "/") ||
+                          fileFolderPath === normalizedFolder;
 
                 const cache = metadataCache.getFileCache(file);
                 const normalizedFmTags = (cache?.frontmatter?.tags ?? []).map(
@@ -180,6 +321,7 @@ export class BookshelfView extends ItemView {
                 );
                 const hasFrontmatterTag = normalizedFmTags.includes(tag);
 
+                if (tag === "") return inFolder;
                 return inFolder || hasInlineTag || hasFrontmatterTag;
             })
             .map((file) => {
@@ -201,16 +343,144 @@ export class BookshelfView extends ItemView {
                             : undefined,
                     color: fm.color,
                     progress,
+                    series: fm.series,
+                    position:
+                        typeof fm.position === "number" ? fm.position : undefined,
+                    added: file.stat?.ctime ?? 0,
                 };
-            })
-            .sort((a, b) => a.title.localeCompare(b.title));
+            });
+    }
+
+    /** Apply the search term and the filter chip. */
+    private applyFilter(books: Book[]): Book[] {
+        const { filter } = this.plugin.settings;
+        const term = this.searchTerm.trim().toLowerCase();
+
+        let result = books;
+
+        if (term !== "") {
+            result = result.filter(
+                (book) =>
+                    book.title.toLowerCase().includes(term) ||
+                    (book.author ?? "").toLowerCase().includes(term) ||
+                    (book.series ?? "").toLowerCase().includes(term),
+            );
+        }
+
+        switch (filter) {
+            case "reading":
+                result = result.filter((book) => book.status === "reading");
+                break;
+            case "completed":
+                result = result.filter((book) => book.status === "completed");
+                break;
+            case "unrated":
+                result = result.filter((book) => book.rating === undefined);
+                break;
+            case "all":
+            default:
+                break;
+        }
+
+        return this.sortBooks(result);
+    }
+
+    private sortBooks(books: Book[]): Book[] {
+        const { sortOrder } = this.plugin.settings;
+        const sorted = [...books];
+
+        switch (sortOrder) {
+            case "author":
+                // A book with no author sorts after the ones that have one,
+                // rather than ahead of them.
+                sorted.sort((a, b) => {
+                    if (!a.author && !b.author) return a.title.localeCompare(b.title);
+                    if (!a.author) return 1;
+                    if (!b.author) return -1;
+                    return (
+                        a.author.localeCompare(b.author) ||
+                        a.title.localeCompare(b.title)
+                    );
+                });
+                break;
+            case "rating":
+                sorted.sort(
+                    (a, b) =>
+                        (b.rating ?? 0) - (a.rating ?? 0) ||
+                        a.title.localeCompare(b.title),
+                );
+                break;
+            case "progress":
+                sorted.sort(
+                    (a, b) =>
+                        (b.progress ?? -1) - (a.progress ?? -1) ||
+                        a.title.localeCompare(b.title),
+                );
+                break;
+            case "added":
+                sorted.sort((a, b) => b.added - a.added);
+                break;
+            case "title":
+            default:
+                sorted.sort((a, b) => a.title.localeCompare(b.title));
+                break;
+        }
+
+        return sorted;
+    }
+
+    /**
+     * Group the books into rows. Books sharing a `series` get their own row
+     * and are ordered by their `position`; everything else shares the first
+     * row.
+     */
+    private buildRows(books: Book[]): ShelfRow[] {
+        const { groupBySeries } = this.plugin.settings;
+        if (!groupBySeries) {
+            return [{ books }];
+        }
+
+        const series = new Map<string, Book[]>();
+        const loose: Book[] = [];
+
+        for (const book of books) {
+            if (book.series) {
+                const group = series.get(book.series) ?? [];
+                group.push(book);
+                series.set(book.series, group);
+            } else {
+                loose.push(book);
+            }
+        }
+
+        const rows: ShelfRow[] = [];
+
+        if (loose.length > 0) {
+            rows.push({ books: loose });
+        }
+
+        for (const [name, group] of [...series.entries()].sort((a, b) =>
+            a[0].localeCompare(b[0]),
+        )) {
+            rows.push({
+                series: name,
+                books: group.sort(
+                    (a, b) =>
+                        (a.position ?? Number.MAX_SAFE_INTEGER) -
+                            (b.position ?? Number.MAX_SAFE_INTEGER) ||
+                        a.title.localeCompare(b.title),
+                ),
+            });
+        }
+
+        return rows;
     }
 
     // ─── Book Spine Builder ───────────────────────────────────────────────────────
 
     private buildBookSpine(book: Book, animated: boolean, index: number): HTMLElement {
         const { theme } = this.plugin.settings;
-        const spineColor = book.color || this.generateColor(book.title, theme);
+        const spineColor = this.resolveColor(book, theme);
         const isReading = book.status === "reading";
         const isCompleted = book.status === "completed";
 
@@ -225,9 +495,9 @@ export class BookshelfView extends ItemView {
         bookEl.dataset.path = book.file.path;
         bookEl.dataset.index = String(index);
 
-        bookEl.style.setProperty("--book-color", spineColor);
-        bookEl.style.setProperty("--book-color-dark", this.shiftLightness(spineColor, -18));
-        bookEl.style.setProperty("--book-color-light", this.shiftLightness(spineColor, 15));
+        bookEl.style.setProperty("--book-color", spineColor.base);
+        bookEl.style.setProperty("--book-color-dark", spineColor.dark);
+        bookEl.style.setProperty("--book-color-light", spineColor.light);
         bookEl.style.setProperty("--book-index", String(index));
 
         if (animated) {
@@ -235,13 +505,30 @@ export class BookshelfView extends ItemView {
             bookEl.style.transform = "translateY(22px)";
         }
 
-        const heightVariant = 160 + (this.hashCode(book.title) % 80);
+        // The hash is taken as an absolute value so the height stays inside
+        // the intended range regardless of the sign of the hash.
+        const heightVariant = 160 + (hashCode(book.title) % 80);
         bookEl.style.height = `${heightVariant}px`;
+
+        // The full title is always available, even when the spine is too
+        // narrow to show it.
+        const tooltip = [
+            book.title,
+            book.author ? `by ${book.author}` : null,
+            book.status ? `· ${book.status}` : null,
+            book.series
+                ? `· ${book.series}${book.position ? ` #${book.position}` : ""}`
+                : null,
+        ]
+            .filter(Boolean)
+            .join(" ");
+        bookEl.setAttribute("title", tooltip);
 
         if (book.progress !== undefined && book.progress > 0) {
             const strip = document.createElement("div");
             strip.className = "progress-strip";
             strip.style.setProperty("--progress", `${book.progress}%`);
+            strip.setAttribute("role", "img");
             strip.setAttribute("aria-label", `${book.progress}% read`);
             bookEl.appendChild(strip);
         }
@@ -264,6 +551,11 @@ export class BookshelfView extends ItemView {
         if (book.rating !== undefined) {
             const ratingEl = document.createElement("div");
             ratingEl.className = "book-rating";
+            ratingEl.setAttribute("role", "img");
+            ratingEl.setAttribute(
+                "aria-label",
+                `Rated ${book.rating} out of ${book.rating}`,
+            );
             for (let i = 1; i <= 5; i++) {
                 const dot = document.createElement("span");
                 dot.className = `rating-dot${i <= book.rating ? " filled" : ""}`;
@@ -272,17 +564,28 @@ export class BookshelfView extends ItemView {
             spine.appendChild(ratingEl);
         }
 
+        if (book.series && book.position) {
+            const seriesEl = document.createElement("div");
+            seriesEl.className = "book-series";
+            seriesEl.textContent = `#${book.position}`;
+            spine.appendChild(seriesEl);
+        }
+
         bookEl.appendChild(spine);
 
         if (book.status) {
             const badge = document.createElement("div");
-            badge.className = `status-badge status-${book.status}`;
+            badge.className = `status-badge status-${this.slugify(book.status)}`;
+            badge.style.setProperty(
+                "--status-color",
+                this.statusColor(book.status),
+            );
             badge.setAttribute("aria-label", `Status: ${book.status}`);
             bookEl.appendChild(badge);
         }
 
         bookEl.addEventListener("click", () => {
-            this.app.workspace.getLeaf(false).openFile(book.file);
+            this.openBook(book);
         });
         bookEl.setAttribute("tabindex", "0");
         bookEl.setAttribute("role", "button");
@@ -290,7 +593,7 @@ export class BookshelfView extends ItemView {
         bookEl.addEventListener("keydown", (e) => {
             if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
-                this.app.workspace.getLeaf(false).openFile(book.file);
+                this.openBook(book);
             }
         });
 
@@ -329,6 +632,32 @@ export class BookshelfView extends ItemView {
         return bookEl;
     }
 
+    /**
+     * Open a note in a split leaf, so the shelf stays in view rather than
+     * being replaced by the note.
+     */
+    private openBook(book: Book): void {
+        const leaf = this.app.workspace.getLeaf("split");
+        void leaf.openFile(book.file);
+    }
+
+    // ─── Status Helpers ─────────────────────────────────────────────────────────
+
+    private statusColor(status: string): string {
+        const list: StatusDefinition[] = this.plugin.settings.statuses;
+        const match = list.find(
+            (entry) => entry.name.toLowerCase() === status.toLowerCase(),
+        );
+        return match?.color ?? STATUS_FALLBACK;
+    }
+
+    private slugify(value: string): string {
+        return value
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "");
+    }
+
     // ─── Entrance Animation ───────────────────────────────────────────────────────
 
     private triggerEntranceAnimation(bookEls: HTMLElement[]): void {
@@ -345,43 +674,70 @@ export class BookshelfView extends ItemView {
         });
     }
 
-    // ─── Color Utilities ──────────────────────────────────────────────────────────
+    // ─── Colour Utilities ──────────────────────────────────────────────────────────
 
-    /** Deterministic color from a string, tuned per theme */
-    private generateColor(str: string, theme: Theme): string {
-        const hash = this.hashCode(str);
+    /**
+     * The colour a spine is drawn in, along with the darker and lighter
+     * variants the gradient uses. A colour given in the note is parsed so
+     * that hex, `rgb()` and named colours all work; a note with no colour
+     * gets a deterministic one from its title.
+     */
+    private resolveColor(
+        book: Book,
+        theme: Theme,
+    ): { base: string; dark: string; light: string } {
+        const generated = this.generateColor(book.title, theme);
+
+        if (!book.color) {
+            return {
+                base: generated.base,
+                dark: generated.dark,
+                light: generated.light,
+            };
+        }
+
+        const parsed = parseColor(book.color);
+        if (!parsed) {
+            return {
+                base: generated.base,
+                dark: generated.dark,
+                light: generated.light,
+            };
+        }
+
+        return {
+            base: hslToString(parsed),
+            dark: hslToString(shiftLightness(parsed, -18)),
+            light: hslToString(shiftLightness(parsed, 15)),
+        };
+    }
+
+    /** Deterministic colour from a string, tuned per theme */
+    private generateColor(
+        str: string,
+        theme: Theme,
+    ): { base: string; dark: string; light: string } {
+        const hash = hashCode(str);
+        let h: number;
+        let s: number;
+        let l: number;
+
         if (theme === "cozy") {
-            const hue = 20 + (Math.abs(hash) % 180);
-            const sat = 45 + (Math.abs(hash >> 4) % 25);
-            const light = 35 + (Math.abs(hash >> 8) % 20);
-            return `hsl(${hue}, ${sat}%, ${light}%)`;
+            h = 20 + (hash % 180);
+            s = 45 + ((hash >> 4) % 25);
+            l = 35 + ((hash >> 8) % 20);
         } else {
-            const hue = Math.abs(hash) % 360;
-            const sat = 70 + (Math.abs(hash >> 4) % 25);
-            const light = 40 + (Math.abs(hash >> 8) % 20);
-            return `hsl(${hue}, ${sat}%, ${light}%)`;
+            h = hash % 360;
+            s = 70 + ((hash >> 4) % 25);
+            l = 40 + ((hash >> 8) % 20);
         }
-    }
 
-    /** Shift the lightness component of an hsl() color string */
-    private shiftLightness(color: string, delta: number): string {
-        return color.replace(
-            /hsl\((\d+\.?\d*),\s*(\d+\.?\d*)%,\s*(\d+\.?\d*)%\)/,
-            (_match, h, s, l) => {
-                const newL = Math.min(100, Math.max(0, parseFloat(l) + delta));
-                return `hsl(${h}, ${s}%, ${newL}%)`;
-            },
-        );
-    }
-
-    /** Simple deterministic hash from string */
-    private hashCode(str: string): number {
-        let hash = 0;
-        for (let i = 0; i < str.length; i++) {
-            hash = Math.imul(31, hash) + str.charCodeAt(i);
-            hash |= 0;
-        }
-        return hash;
+        const base = { h, s, l };
+        return {
+            base: hslToString(base),
+            dark: hslToString(shiftLightness(base, -18)),
+            light: hslToString(shiftLightness(base, 15)),
+        };
     }
 
     // ─── Three.js Background (Cybersigilism) ─────────────────────────────────────
