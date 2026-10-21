@@ -1,4 +1,4 @@
-import { Plugin, type WorkspaceLeaf } from "obsidian";
+import { Notice, Plugin, TFile, normalizePath, type WorkspaceLeaf } from "obsidian";
 
 import {
     BookshelfSettingTab,
@@ -6,10 +6,24 @@ import {
     type BookshelfSettings,
 } from "./settings";
 import { BookshelfView, VIEW_TYPE_BOOKSHELF } from "./bookshelfView";
+import {
+    LOG_KEY,
+    exportLog,
+    readLog,
+    recordSession,
+    removeBook,
+    todayKey,
+    writeLog,
+    type LogState,
+    type ReadingSession,
+} from "./log";
 
 export default class CinematicBookshelfPlugin extends Plugin {
     settings: BookshelfSettings = DEFAULT_SETTINGS;
     private _debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    /** The reading log, kept alongside the settings in the plugin's data. */
+    log: LogState = { sessions: [] };
 
     async onload(): Promise<void> {
         await this.loadSettings();
@@ -57,7 +71,8 @@ export default class CinematicBookshelfPlugin extends Plugin {
     }
 
     async loadSettings(): Promise<void> {
-        const stored = ((await this.loadData()) ?? {}) as Partial<BookshelfSettings>;
+        const data = (await this.loadData()) ?? {};
+        const stored = data as Partial<BookshelfSettings>;
         this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
 
         // The status list is merged rather than replaced, so a status added in
@@ -65,10 +80,59 @@ export default class CinematicBookshelfPlugin extends Plugin {
         if (!Array.isArray(stored.statuses) || stored.statuses.length === 0) {
             this.settings.statuses = DEFAULT_SETTINGS.statuses;
         }
+
+        // The reading log lives in the same file as the settings, so it is
+        // read back out of the saved data here.
+        this.log = readLog(data);
     }
 
     async saveSettings(): Promise<void> {
-        await this.saveData(this.settings);
+        await this.saveData(writeLog({ ...this.settings }, this.log));
+    }
+
+    // ─── Reading log ──────────────────────────────────────────────────────────
+
+    /** Record a reading session and save it. */
+    async logSession(session: ReadingSession): Promise<void> {
+        this.log = recordSession(this.log, session);
+        await this.saveSettings();
+    }
+
+    /** Drop every session for a book, used when its note goes away. */
+    async forgetBook(book: string): Promise<void> {
+        this.log = removeBook(this.log, book);
+        await this.saveSettings();
+    }
+
+    /** The key the log is stored under. */
+    static get logKey(): string {
+        return LOG_KEY;
+    }
+
+    /**
+     * Write the reading log to a file in the vault, so another tool can
+     * pick it up. The file is named with the date, so exports do not
+     * overwrite one another.
+     */
+    async exportLog(): Promise<void> {
+        const json = exportLog(this.log);
+        const name = `reading-log-${todayKey()}.json`;
+        // Written to the vault root, which always exists.
+        const path = normalizePath(name);
+
+        try {
+            const existing = this.app.vault.getAbstractFileByPath(path);
+            if (existing instanceof TFile) {
+                await this.app.vault.modify(existing, json);
+            } else {
+                await this.app.vault.create(path, json);
+            }
+            new Notice(`Reading log exported to ${path}`);
+        } catch (error) {
+            new Notice(
+                `Could not export the reading log: ${error instanceof Error ? error.message : String(error)}`,
+            );
+        }
     }
 
     // ─── View management ──────────────────────────────────────────────────────

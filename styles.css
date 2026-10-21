@@ -117,11 +117,15 @@
     padding: 14px 4px 12px;
     margin-bottom: 14px;
     border-bottom: 1px solid var(--shelf-edge);
+    /* A frosted bar, so the shelf scrolling under it blurs rather than
+       sliding behind an opaque strip. */
     background: linear-gradient(
         180deg,
-        var(--obs-bg) 40%,
-        transparent 100%
+        color-mix(in srgb, var(--obs-bg) 82%, transparent) 0%,
+        color-mix(in srgb, var(--obs-bg) 40%, transparent) 100%
     );
+    backdrop-filter: blur(var(--shelf-blur)) saturate(140%);
+    -webkit-backdrop-filter: blur(var(--shelf-blur)) saturate(140%);
 }
 
 .header-titles {
@@ -162,12 +166,33 @@
     align-items: center;
 }
 
+/* The magnifier is drawn here rather than shipped as an icon, so the plugin
+   needs no image files and the glyph takes the theme's own colour. */
 .search-icon {
     position: absolute;
-    left: 8px;
-    font-size: 0.75em;
-    opacity: 0.55;
+    left: 9px;
+    top: 50%;
+    width: 9px;
+    height: 9px;
+    margin-top: -5px;
+    border: 1.5px solid var(--shelf-muted);
+    border-radius: 50%;
+    opacity: 0.75;
     pointer-events: none;
+}
+
+/* The handle, drawn as a rotated bar off the circle. */
+.search-icon::after {
+    content: "";
+    position: absolute;
+    right: -3.5px;
+    bottom: -3px;
+    width: 5px;
+    height: 1.5px;
+    border-radius: 1px;
+    background: var(--shelf-muted);
+    transform: rotate(45deg);
+    transform-origin: left center;
 }
 
 .shelf-search {
@@ -262,6 +287,16 @@
     color: var(--shelf-muted);
 }
 
+/* The label sits on a small frosted pill, so it reads as a shelf divider. */
+.shelf-row-label span {
+    padding: 2px 9px;
+    border: 1px solid var(--shelf-edge);
+    border-radius: 999px;
+    background: var(--shelf-surface);
+    backdrop-filter: blur(var(--shelf-blur));
+    -webkit-backdrop-filter: blur(var(--shelf-blur));
+}
+
 .shelf-row-label::after {
     content: "";
     flex: 1;
@@ -286,12 +321,17 @@
     height: 9px;
     margin-top: -1px;
     border-radius: 2px;
+    /* A pane of glass with a lit top edge, rather than a solid plank. */
     background: linear-gradient(
         180deg,
-        color-mix(in srgb, var(--shelf-edge) 30%, transparent),
-        var(--shelf-floor)
+        color-mix(in srgb, var(--shelf-edge) 45%, transparent) 0%,
+        color-mix(in srgb, var(--shelf-floor) 72%, transparent) 100%
     );
-    box-shadow: 0 6px 14px rgb(0 0 0 / 32%);
+    backdrop-filter: blur(var(--shelf-blur));
+    -webkit-backdrop-filter: blur(var(--shelf-blur));
+    box-shadow:
+        0 6px 14px rgb(0 0 0 / 32%),
+        inset 0 1px 0 color-mix(in srgb, var(--shelf-edge) 70%, transparent);
 }
 
 /* ─── Book spine: the glass ─────────────────────────────────────────────────── */
@@ -306,14 +346,17 @@
     padding: 0;
     border: 1px solid var(--shelf-edge);
     border-radius: var(--shelf-radius) var(--shelf-radius) 2px 2px;
-    background:
-        linear-gradient(
-            to right,
-            var(--book-color-dark) 0%,
-            var(--book-color) 38%,
-            var(--book-color-light) 72%,
-            var(--book-color-dark) 100%
-        );
+    /* The colour is translucent, so whatever is behind the shelf shows
+       through the spine. */
+    background: linear-gradient(
+        to right,
+        color-mix(in srgb, var(--book-color-dark) 55%, transparent) 0%,
+        color-mix(in srgb, var(--book-color) 55%, transparent) 38%,
+        color-mix(in srgb, var(--book-color-light) 55%, transparent) 72%,
+        color-mix(in srgb, var(--book-color-dark) 55%, transparent) 100%
+    );
+    backdrop-filter: blur(7px) saturate(150%);
+    -webkit-backdrop-filter: blur(7px) saturate(150%);
     box-shadow:
         0 6px 16px rgb(0 0 0 / 34%),
         inset 0 1px 0 var(--shelf-sheen),
@@ -588,4 +631,260 @@
         -webkit-backdrop-filter: none;
         background: var(--shelf-surface-strong);
     }
+}
+
+/* ─── Reading tracker ──────────────────────────────────────────────────────── */
+
+/* The strip above the shelf: streak, week, finished, and the heatmap. */
+.reading-summary {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    border: 1px solid var(--shelf-edge);
+    border-radius: 10px;
+    background: var(--shelf-surface);
+    backdrop-filter: blur(var(--shelf-blur));
+    -webkit-backdrop-filter: blur(var(--shelf-blur));
+}
+
+.summary-stats {
+    display: flex;
+    gap: 18px;
+}
+
+.summary-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    line-height: 1.1;
+}
+
+.stat-value {
+    font-size: 1.15em;
+    font-weight: 650;
+    color: var(--shelf-text);
+    font-variant-numeric: tabular-nums;
+}
+
+.stat-label {
+    font-size: 0.66em;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--shelf-muted);
+}
+
+/* The heatmap: one column per week, seven cells per column. */
+.summary-heatmap {
+    display: flex;
+    gap: 2px;
+    margin-left: auto;
+    padding: 3px;
+    border-radius: 5px;
+    background: rgb(0 0 0 / 16%);
+}
+
+.heat-week {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.heat-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 1.5px;
+    background: rgb(255 255 255 / 7%);
+}
+
+.heat-dot.level-1 {
+    background: color-mix(in srgb, var(--shelf-accent) 28%, transparent);
+}
+
+.heat-dot.level-2 {
+    background: color-mix(in srgb, var(--shelf-accent) 52%, transparent);
+}
+
+.heat-dot.level-3 {
+    background: color-mix(in srgb, var(--shelf-accent) 78%, transparent);
+}
+
+.heat-dot.level-4 {
+    background: var(--shelf-accent);
+    box-shadow: 0 0 4px color-mix(in srgb, var(--shelf-accent) 60%, transparent);
+}
+
+.heat-dot.is-today {
+    outline: 1px solid var(--shelf-edge);
+    outline-offset: 1px;
+}
+
+/* The dots down the side of a spine: the last 30 days of reading. */
+.book-heat {
+    position: absolute;
+    z-index: 2;
+    right: 2px;
+    top: 4px;
+    bottom: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    justify-content: flex-end;
+    pointer-events: none;
+}
+
+.book-heat .heat-dot {
+    width: 3px;
+    height: 3px;
+    border-radius: 1px;
+}
+
+/* A streak marker on a spine that has been read on consecutive days. */
+.book-streak {
+    position: absolute;
+    z-index: 2;
+    top: 4px;
+    left: 4px;
+    min-width: 13px;
+    height: 13px;
+    padding: 0 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    font-size: 0.5em;
+    font-weight: 700;
+    color: #1a1206;
+    background: var(--shelf-accent);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--shelf-accent) 70%, transparent);
+}
+
+/* ─── The log bar ──────────────────────────────────────────────────────────── */
+
+.log-bar {
+    position: absolute;
+    z-index: 10;
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--shelf-edge);
+    border-radius: 12px;
+    background: var(--shelf-surface-strong);
+    backdrop-filter: blur(calc(var(--shelf-blur) * 1.4));
+    -webkit-backdrop-filter: blur(calc(var(--shelf-blur) * 1.4));
+    box-shadow:
+        0 14px 34px rgb(0 0 0 / 45%),
+        inset 0 1px 0 var(--shelf-sheen);
+}
+
+.log-bar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.log-bar-title {
+    font-size: 0.85em;
+    font-weight: 600;
+    color: var(--shelf-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.log-bar-close {
+    border: none;
+    background: transparent;
+    color: var(--shelf-muted);
+    font-size: 0.75em;
+    cursor: pointer;
+}
+
+.log-bar-close:hover {
+    color: var(--shelf-text);
+}
+
+.log-bar-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: flex-end;
+}
+
+.log-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.log-field label {
+    font-size: 0.62em;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--shelf-muted);
+}
+
+.log-input {
+    padding: 4px 7px;
+    min-width: 78px;
+    border: 1px solid var(--shelf-edge);
+    border-radius: 6px;
+    background: rgb(0 0 0 / 24%);
+    color: var(--shelf-text);
+    font-size: 0.8em;
+    outline: none;
+}
+
+.log-input:focus {
+    border-color: var(--shelf-accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--shelf-accent) 30%, transparent);
+}
+
+.log-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.log-submit,
+.log-finish,
+.log-quick-button {
+    padding: 5px 11px;
+    border-radius: 6px;
+    border: 1px solid var(--shelf-edge);
+    background: rgb(255 255 255 / 8%);
+    color: var(--shelf-text);
+    font-size: 0.78em;
+    cursor: pointer;
+}
+
+.log-submit {
+    background: var(--shelf-accent);
+    border-color: transparent;
+    color: #fff;
+}
+
+.log-quick {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    padding-top: 9px;
+    border-top: 1px solid var(--shelf-edge);
+}
+
+.log-quick-label {
+    font-size: 0.66em;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--shelf-muted);
+}
+
+.log-quick-button:hover,
+.log-finish:hover {
+    background: rgb(255 255 255 / 15%);
 }

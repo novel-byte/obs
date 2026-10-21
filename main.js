@@ -46,7 +46,10 @@ var DEFAULT_SETTINGS = {
     { name: "abandoned", color: "#c97f7f" }
   ],
   glassEnabled: true,
-  followObsidianTheme: true
+  followObsidianTheme: true,
+  trackingEnabled: true,
+  heatDays: 30,
+  heatmapWeeks: 52
 };
 var BookshelfSettingTab = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
@@ -56,22 +59,22 @@ var BookshelfSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "\u{1F4DA} Cinematic Bookshelf" });
+    containerEl.createEl("h2", { text: "Cinematic Bookshelf" });
     containerEl.createEl("p", {
       text: "Configure your animated bookshelf experience.",
       cls: "setting-item-description"
     });
     containerEl.createEl("hr");
-    new import_obsidian.Setting(containerEl).setName("\u{1F3A8} Theme").setDesc(
+    new import_obsidian.Setting(containerEl).setName("Theme").setDesc(
       "Choose your bookshelf aesthetic. Cozy uses warm wood tones; Cybersigilism uses matte black with neon glow."
     ).addDropdown(
-      (drop) => drop.addOption("cozy", "\u{1F332} Cozy \u2014 Warm & Wooden").addOption("cybersigilism", "\u{1F9FF} Cybersigilism \u2014 Neon & Dark").setValue(this.plugin.settings.theme).onChange(async (value) => {
+      (drop) => drop.addOption("cozy", "Cozy \u2014 Warm & Wooden").addOption("cybersigilism", "Cybersigilism \u2014 Neon & Dark").setValue(this.plugin.settings.theme).onChange(async (value) => {
         this.plugin.settings.theme = value;
         await this.plugin.saveSettings();
         this.plugin.refreshView();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("\u{1F4C1} Books folder").setDesc(
+    new import_obsidian.Setting(containerEl).setName("Books folder").setDesc(
       "Path to the folder containing your book notes, relative to the vault root. Example: Books or Reading/Library. Leave empty to use the tag alone."
     ).addText(
       (text) => text.setPlaceholder("Books").setValue(this.plugin.settings.folderPath).onChange(async (value) => {
@@ -80,7 +83,7 @@ var BookshelfSettingTab = class extends import_obsidian.PluginSettingTab {
         this.plugin.debouncedRefresh();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("\u{1F3F7}\uFE0F Book tag").setDesc(
+    new import_obsidian.Setting(containerEl).setName("Book tag").setDesc(
       "Tag used to identify a book note (without #). Notes with this tag anywhere in the vault will appear on the shelf."
     ).addText(
       (text) => text.setPlaceholder("book").setValue(this.plugin.settings.tag).onChange(async (value) => {
@@ -89,21 +92,21 @@ var BookshelfSettingTab = class extends import_obsidian.PluginSettingTab {
         this.plugin.debouncedRefresh();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("\u{1F522} Sort by").setDesc("The order books appear along the shelf.").addDropdown(
+    new import_obsidian.Setting(containerEl).setName("Sort by").setDesc("The order books appear along the shelf.").addDropdown(
       (drop) => drop.addOption("title", "Title").addOption("author", "Author").addOption("rating", "Rating").addOption("progress", "Progress").addOption("added", "Date added").setValue(this.plugin.settings.sortOrder).onChange(async (value) => {
         this.plugin.settings.sortOrder = value;
         await this.plugin.saveSettings();
         this.plugin.refreshView();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("\u{1F50D} Show").setDesc("Which books are on the shelf.").addDropdown(
+    new import_obsidian.Setting(containerEl).setName("Show").setDesc("Which books are on the shelf.").addDropdown(
       (drop) => drop.addOption("all", "All books").addOption("reading", "Reading").addOption("completed", "Completed").addOption("unrated", "Unrated").setValue(this.plugin.settings.filter).onChange(async (value) => {
         this.plugin.settings.filter = value;
         await this.plugin.saveSettings();
         this.plugin.refreshView();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("\u{1F4DA} Group by series").setDesc(
+    new import_obsidian.Setting(containerEl).setName("Group by series").setDesc(
       "Give books sharing a `series` frontmatter their own row, in the order the `position` field gives."
     ).addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.groupBySeries).onChange(async (value) => {
@@ -112,7 +115,7 @@ var BookshelfSettingTab = class extends import_obsidian.PluginSettingTab {
         this.plugin.refreshView();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("\u{1FA9F} Frosted glass").setDesc(
+    new import_obsidian.Setting(containerEl).setName("Frosted glass").setDesc(
       "Draw the spines as frosted panels over the background. Turn off for a solid shelf."
     ).addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.glassEnabled).onChange(async (value) => {
@@ -121,7 +124,46 @@ var BookshelfSettingTab = class extends import_obsidian.PluginSettingTab {
         this.plugin.refreshView();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("\u{1F39B}\uFE0F Follow the Obsidian theme").setDesc(
+    containerEl.createEl("h3", { text: "Reading tracker" });
+    containerEl.createEl("p", {
+      text: "Record what you read, and see your streaks and activity.",
+      cls: "setting-item-description"
+    });
+    new import_obsidian.Setting(containerEl).setName("Track reading").setDesc(
+      "Log a session from the shelf, and show streaks, per-book activity and the weekly heatmap."
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.trackingEnabled).onChange(async (value) => {
+        this.plugin.settings.trackingEnabled = value;
+        await this.plugin.saveSettings();
+        this.plugin.refreshView();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Days of activity per book").setDesc(
+      "How many days of reading the dots down the side of each spine cover."
+    ).addSlider(
+      (slider) => slider.setLimits(7, 90, 1).setDynamicTooltip().setValue(this.plugin.settings.heatDays).onChange(async (value) => {
+        this.plugin.settings.heatDays = value;
+        await this.plugin.saveSettings();
+        this.plugin.refreshView();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Weeks in the heatmap").setDesc(
+      "How many weeks the heatmap above the shelf covers. 52 is a year."
+    ).addSlider(
+      (slider) => slider.setLimits(4, 104, 1).setDynamicTooltip().setValue(this.plugin.settings.heatmapWeeks).onChange(async (value) => {
+        this.plugin.settings.heatmapWeeks = value;
+        await this.plugin.saveSettings();
+        this.plugin.refreshView();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Export the reading log").setDesc(
+      "Write every logged session to a JSON file, so another tool can pick up your reading history."
+    ).addButton(
+      (button) => button.setButtonText("Export").onClick(async () => {
+        await this.plugin.exportLog();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Follow the Obsidian theme").setDesc(
       "Take the base colours from Obsidian's own theme, so the shelf fits whichever theme you use."
     ).addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.followObsidianTheme).onChange(async (value) => {
@@ -130,7 +172,7 @@ var BookshelfSettingTab = class extends import_obsidian.PluginSettingTab {
         this.plugin.refreshView();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("\u2728 Enable animations").setDesc(
+    new import_obsidian.Setting(containerEl).setName("Enable animations").setDesc(
       "Toggle staggered entrance animations and hover effects. Disable for accessibility or performance."
     ).addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.animationsEnabled).onChange(async (value) => {
@@ -21119,6 +21161,197 @@ function hashCode(str) {
   return Math.abs(hash);
 }
 
+// log.ts
+var LOG_KEY = "readingLog";
+function readLog(data) {
+  if (!data || typeof data !== "object")
+    return { sessions: [] };
+  const raw = data[LOG_KEY];
+  if (!raw || typeof raw !== "object")
+    return { sessions: [] };
+  const sessions = raw.sessions;
+  if (!Array.isArray(sessions))
+    return { sessions: [] };
+  return {
+    sessions: sessions.filter(
+      (entry) => !!entry && typeof entry === "object" && typeof entry.book === "string" && typeof entry.date === "string" && typeof entry.minutes === "number"
+    )
+  };
+}
+function writeLog(data, log) {
+  const base = data && typeof data === "object" ? { ...data } : {};
+  base[LOG_KEY] = log;
+  return base;
+}
+function toDateKey(year, month, day) {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+function isValidDateKey(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value))
+    return false;
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day)
+    return false;
+  if (month < 1 || month > 12)
+    return false;
+  if (day < 1 || day > 31)
+    return false;
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+}
+function todayKey(now = /* @__PURE__ */ new Date()) {
+  return toDateKey(now.getFullYear(), now.getMonth() + 1, now.getDate());
+}
+function addDays(key, days) {
+  const [year, month, day] = key.split("-").map(Number);
+  const date = new Date(year, month - 1, day + days);
+  return toDateKey(date.getFullYear(), date.getMonth() + 1, date.getDate());
+}
+function recordSession(log, session) {
+  if (!isValidDateKey(session.date))
+    return log;
+  if (!Number.isFinite(session.minutes) || session.minutes <= 0)
+    return log;
+  if (session.book.trim() === "")
+    return log;
+  return {
+    sessions: [
+      ...log.sessions,
+      {
+        ...session,
+        book: session.book.trim(),
+        minutes: Math.round(session.minutes)
+      }
+    ]
+  };
+}
+function removeBook(log, book) {
+  return {
+    sessions: log.sessions.filter((session) => session.book !== book)
+  };
+}
+function sessionsForBook(log, book) {
+  return log.sessions.filter((session) => session.book === book).sort((a, b) => a.date.localeCompare(b.date));
+}
+function daysForBook(log, book) {
+  var _a;
+  const days = /* @__PURE__ */ new Map();
+  for (const session of sessionsForBook(log, book)) {
+    days.set(session.date, ((_a = days.get(session.date)) != null ? _a : 0) + session.minutes);
+  }
+  return days;
+}
+function readingDays(log) {
+  var _a;
+  const days = /* @__PURE__ */ new Map();
+  for (const session of log.sessions) {
+    days.set(session.date, ((_a = days.get(session.date)) != null ? _a : 0) + session.minutes);
+  }
+  return days;
+}
+function minutesInWeekEnding(log, end) {
+  const start = addDays(end, -6);
+  return log.sessions.filter((session) => session.date >= start && session.date <= end).reduce((sum, session) => sum + session.minutes, 0);
+}
+function currentStreak(log, today = todayKey()) {
+  const days = readingDays(log);
+  if (days.size === 0)
+    return 0;
+  let cursor = days.has(today) ? today : addDays(today, -1);
+  if (!days.has(cursor))
+    return 0;
+  let streak = 0;
+  while (days.has(cursor)) {
+    streak++;
+    cursor = addDays(cursor, -1);
+  }
+  return streak;
+}
+function streakEndingOn(log, date) {
+  const days = readingDays(log);
+  let cursor = date;
+  let streak = 0;
+  while (days.has(cursor)) {
+    streak++;
+    cursor = addDays(cursor, -1);
+  }
+  return streak;
+}
+function levelFor(minutes) {
+  if (minutes <= 0)
+    return 0;
+  if (minutes < 15)
+    return 1;
+  if (minutes < 30)
+    return 2;
+  if (minutes < 60)
+    return 3;
+  return 4;
+}
+function heatmapForRange(log, from, to) {
+  var _a;
+  const days = readingDays(log);
+  const cells = [];
+  let cursor = from;
+  let guard = 0;
+  while (cursor <= to && guard < 2e3) {
+    const minutes = (_a = days.get(cursor)) != null ? _a : 0;
+    cells.push({ date: cursor, minutes, level: levelFor(minutes) });
+    cursor = addDays(cursor, 1);
+    guard++;
+  }
+  return cells;
+}
+function heatmapByWeek(log, today, weeks) {
+  const [year, month, day] = today.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  const weekday = (date.getDay() + 6) % 7;
+  const thisWeekStart = addDays(today, -weekday);
+  const columns = [];
+  for (let i = weeks - 1; i >= 0; i--) {
+    const start = addDays(thisWeekStart, -i * 7);
+    columns.push({
+      start,
+      days: heatmapForRange(log, start, addDays(start, 6))
+    });
+  }
+  return columns;
+}
+function exportLog(log) {
+  var _a;
+  const sessions = [...log.sessions].sort(
+    (a, b) => a.date.localeCompare(b.date) || a.book.localeCompare(b.book)
+  );
+  const books = {};
+  for (const session of sessions) {
+    const entry = (_a = books[session.book]) != null ? _a : {
+      minutes: 0,
+      sessions: 0,
+      days: []
+    };
+    entry.minutes += session.minutes;
+    entry.sessions += 1;
+    if (!entry.days.includes(session.date))
+      entry.days.push(session.date);
+    books[session.book] = entry;
+  }
+  const totalMinutes = sessions.reduce(
+    (sum, session) => sum + session.minutes,
+    0
+  );
+  return JSON.stringify(
+    {
+      exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      totalMinutes,
+      totalSessions: sessions.length,
+      books,
+      sessions
+    },
+    null,
+    2
+  );
+}
+
 // bookshelfView.ts
 var VIEW_TYPE_BOOKSHELF = "cinematic-bookshelf-view";
 var STATUS_FALLBACK = "#8b9dc3";
@@ -21135,6 +21368,8 @@ var BookshelfView = class extends import_obsidian2.ItemView {
     this.entranceTimeline = null;
     // ResizeObserver for three.js canvas
     this.resizeObserver = null;
+    // The log bar, shown when a book is opened
+    this.logBar = null;
     // Search term, held outside the DOM so it survives a re-render
     this.searchTerm = "";
     this.threeScene = null;
@@ -21184,6 +21419,9 @@ var BookshelfView = class extends import_obsidian2.ItemView {
     const visible = this.applyFilter(allBooks);
     const rows = this.buildRows(visible);
     this.renderToolbar(shelf, allBooks.length, visible.length);
+    if (this.plugin.settings.trackingEnabled) {
+      this.renderSummary(shelf, visible);
+    }
     if (visible.length === 0) {
       this.renderEmptyState(shelf, allBooks.length);
       return;
@@ -21229,19 +21467,241 @@ var BookshelfView = class extends import_obsidian2.ItemView {
       this.resizeObserver.observe(shelf);
     }
   }
+  // ─── Summary ───────────────────────────────────────────────────────────────
+  /**
+   * The strip above the shelf: the current streak, the minutes read this
+   * week, how many books are finished, and a heatmap of the last 52 weeks.
+   */
+  renderSummary(shelf, books) {
+    const log = this.plugin.log;
+    const today = todayKey();
+    const streak = currentStreak(log, today);
+    const weekMinutes = minutesInWeekEnding(log, today);
+    const finished = books.filter(
+      (book) => {
+        var _a;
+        return ((_a = book.status) == null ? void 0 : _a.toLowerCase()) === "completed";
+      }
+    ).length;
+    const summary = shelf.createDiv({ cls: "reading-summary" });
+    const stats = summary.createDiv({ cls: "summary-stats" });
+    const streakStat = stats.createDiv({ cls: "summary-stat" });
+    streakStat.createEl("span", { cls: "stat-value", text: String(streak) });
+    streakStat.createEl("span", { cls: "stat-label", text: "day streak" });
+    const weekStat = stats.createDiv({ cls: "summary-stat" });
+    weekStat.createEl("span", {
+      cls: "stat-value",
+      text: formatMinutes(weekMinutes)
+    });
+    weekStat.createEl("span", { cls: "stat-label", text: "this week" });
+    const doneStat = stats.createDiv({ cls: "summary-stat" });
+    doneStat.createEl("span", { cls: "stat-value", text: String(finished) });
+    doneStat.createEl("span", { cls: "stat-label", text: "finished" });
+    const weeks = heatmapByWeek(
+      log,
+      today,
+      this.plugin.settings.heatmapWeeks
+    );
+    const map = summary.createDiv({ cls: "summary-heatmap" });
+    map.setAttribute("role", "img");
+    map.setAttribute(
+      "aria-label",
+      `Reading activity over the last ${this.plugin.settings.heatmapWeeks} weeks, ${streak} day streak`
+    );
+    for (const week of weeks) {
+      const column = map.createDiv({ cls: "heat-week" });
+      for (const cell of week.days) {
+        const dot = column.createDiv({ cls: "heat-dot" });
+        if (cell.level > 0)
+          dot.addClass(`level-${cell.level}`);
+        if (cell.date === today)
+          dot.addClass("is-today");
+        dot.setAttribute(
+          "title",
+          `${cell.date}: ${formatMinutes(cell.minutes)}`
+        );
+      }
+    }
+  }
+  // ─── The log bar ────────────────────────────────────────────────────────────
+  /**
+   * Show the log bar for a book.
+   *
+   * It appears over the shelf when a book is opened, so a session can be
+   * recorded without leaving the note. The bar takes the date, the minutes
+   * read, a status and a rating, and writes the status and rating into the
+   * note's own frontmatter.
+   */
+  showLogBar(book) {
+    var _a;
+    this.closeLogBar();
+    const bar = this.containerEl.createDiv({ cls: "log-bar" });
+    this.logBar = bar;
+    const header = bar.createDiv({ cls: "log-bar-header" });
+    header.createEl("span", { cls: "log-bar-title", text: book.title });
+    const close = header.createEl("button", {
+      cls: "log-bar-close",
+      text: "Close",
+      attr: { type: "button", "aria-label": "Close the log bar" }
+    });
+    close.addEventListener("click", () => this.closeLogBar());
+    const form = bar.createDiv({ cls: "log-bar-form" });
+    const dateField = form.createDiv({ cls: "log-field" });
+    dateField.createEl("label", { text: "Date" });
+    const dateInput = dateField.createEl("input", {
+      cls: "log-input",
+      attr: { type: "date", "aria-label": "Reading date" }
+    });
+    dateInput.value = todayKey();
+    const minutesField = form.createDiv({ cls: "log-field" });
+    minutesField.createEl("label", { text: "Minutes" });
+    const minutesInput = minutesField.createEl("input", {
+      cls: "log-input",
+      attr: {
+        type: "number",
+        min: "0",
+        max: "1440",
+        step: "5",
+        placeholder: "30",
+        "aria-label": "Minutes read"
+      }
+    });
+    const statusField = form.createDiv({ cls: "log-field" });
+    statusField.createEl("label", { text: "Status" });
+    const statusSelect = statusField.createEl("select", {
+      cls: "log-input",
+      attr: { "aria-label": "Status" }
+    });
+    statusSelect.createEl("option", { text: "Unchanged", value: "" });
+    for (const status of this.plugin.settings.statuses) {
+      statusSelect.createEl("option", {
+        text: status.name,
+        value: status.name
+      });
+    }
+    statusSelect.value = (_a = book.status) != null ? _a : "";
+    const ratingField = form.createDiv({ cls: "log-field" });
+    ratingField.createEl("label", { text: "Rating" });
+    const ratingSelect = ratingField.createEl("select", {
+      cls: "log-input",
+      attr: { "aria-label": "Rating" }
+    });
+    ratingSelect.createEl("option", { text: "Unchanged", value: "" });
+    for (let i = 1; i <= 5; i++) {
+      ratingSelect.createEl("option", { text: String(i), value: String(i) });
+    }
+    ratingSelect.value = book.rating ? String(book.rating) : "";
+    const actions = form.createDiv({ cls: "log-actions" });
+    const logButton = actions.createEl("button", {
+      cls: "mod-cta log-submit",
+      text: "Log",
+      attr: { type: "button" }
+    });
+    logButton.addEventListener("click", async () => {
+      const minutes = Number(minutesInput.value);
+      const date = dateInput.value;
+      if (Number.isFinite(minutes) && minutes > 0 && date) {
+        await this.plugin.logSession({
+          book: book.title,
+          path: book.file.path,
+          date,
+          minutes
+        });
+        await this.writeBookState(book, {
+          status: statusSelect.value,
+          rating: ratingSelect.value,
+          date
+        });
+        this.closeLogBar();
+        this.render();
+        return;
+      }
+      await this.writeBookState(book, {
+        status: statusSelect.value,
+        rating: ratingSelect.value
+      });
+      this.closeLogBar();
+      this.render();
+    });
+    const finishButton = actions.createEl("button", {
+      cls: "log-finish",
+      text: "Mark finished",
+      attr: { type: "button" }
+    });
+    finishButton.addEventListener("click", async () => {
+      var _a2;
+      const completed = this.plugin.settings.statuses.find(
+        (status) => status.name.toLowerCase() === "completed"
+      );
+      await this.writeBookState(book, {
+        status: (_a2 = completed == null ? void 0 : completed.name) != null ? _a2 : "completed",
+        rating: ratingSelect.value
+      });
+      this.closeLogBar();
+      this.render();
+    });
+    const quick = bar.createDiv({ cls: "log-quick" });
+    quick.createEl("span", { cls: "log-quick-label", text: "Quick log" });
+    for (const minutes of [15, 30, 60]) {
+      const button = quick.createEl("button", {
+        cls: "log-quick-button",
+        text: `${minutes}m`,
+        attr: { type: "button" }
+      });
+      button.addEventListener("click", async () => {
+        await this.plugin.logSession({
+          book: book.title,
+          path: book.file.path,
+          date: todayKey(),
+          minutes
+        });
+        await this.writeBookState(book, {
+          status: statusSelect.value,
+          rating: ratingSelect.value
+        });
+        this.closeLogBar();
+        this.render();
+      });
+    }
+  }
+  closeLogBar() {
+    if (this.logBar) {
+      this.logBar.remove();
+      this.logBar = null;
+    }
+  }
+  /**
+   * Write the status, rating and last-read date into the note's
+   * frontmatter, leaving the body untouched.
+   */
+  async writeBookState(book, state) {
+    const status = state.status;
+    const rating = state.rating;
+    await this.app.fileManager.processFrontMatter(book.file, (frontmatter) => {
+      if (status) {
+        frontmatter.status = status;
+      }
+      if (rating) {
+        frontmatter.rating = Number(rating);
+      }
+      if (state.date) {
+        frontmatter.lastRead = state.date;
+      }
+    });
+  }
   // ─── Toolbar ────────────────────────────────────────────────────────────────
   renderToolbar(shelf, total, shown) {
     const { filter, sortOrder } = this.plugin.settings;
     const header = shelf.createDiv({ cls: "bookshelf-header" });
     const titleGroup = header.createDiv({ cls: "header-titles" });
-    titleGroup.createEl("h2", { text: "\u{1F4DA} Cinematic Bookshelf" });
+    titleGroup.createEl("h2", { text: "Cinematic Bookshelf" });
     titleGroup.createEl("span", {
       cls: "book-count",
       text: shown === total ? `${total} volume${total === 1 ? "" : "s"}` : `${shown} of ${total} volume${total === 1 ? "" : "s"}`
     });
     const controls = header.createDiv({ cls: "header-controls" });
     const searchWrap = controls.createDiv({ cls: "search-wrap" });
-    searchWrap.createEl("span", { cls: "search-icon", text: "\u{1F50D}" });
+    searchWrap.createEl("span", { cls: "search-icon" });
     const search = searchWrap.createEl("input", {
       cls: "shelf-search",
       attr: {
@@ -21312,7 +21772,7 @@ var BookshelfView = class extends import_obsidian2.ItemView {
   // ─── Empty State ─────────────────────────────────────────────────────────────
   renderEmptyState(shelf, total) {
     const empty = shelf.createDiv({ cls: "bookshelf-empty" });
-    empty.createEl("div", { cls: "empty-icon", text: "\u{1F4DA}" });
+    empty.createDiv({ cls: "empty-icon" }).appendChild(bookshelfGlyph());
     empty.createEl("h3", {
       text: total === 0 ? "Your shelf is empty" : "Nothing matches"
     });
@@ -21344,21 +21804,23 @@ var BookshelfView = class extends import_obsidian2.ItemView {
         return inFolder;
       return inFolder || hasInlineTag || hasFrontmatterTag;
     }).map((file) => {
-      var _a, _b, _c;
+      var _a, _b, _c, _d;
       const cache2 = metadataCache.getFileCache(file);
       const fm = (_a = cache2 == null ? void 0 : cache2.frontmatter) != null ? _a : {};
       const progress = typeof fm.progress === "number" ? Math.min(100, Math.max(0, fm.progress)) : void 0;
       return {
         file,
         title: fm.title || file.basename,
-        author: fm.author,
+        // Some notes carry `authors` rather than `author`, so
+        // both are accepted, with `author` taking priority.
+        author: (_b = fm.author) != null ? _b : typeof fm.authors === "string" ? fm.authors : Array.isArray(fm.authors) ? fm.authors.join(", ") : void 0,
         status: fm.status,
         rating: typeof fm.rating === "number" ? Math.min(5, Math.max(1, fm.rating)) : void 0,
         color: fm.color,
         progress,
         series: fm.series,
         position: typeof fm.position === "number" ? fm.position : void 0,
-        added: (_c = (_b = file.stat) == null ? void 0 : _b.ctime) != null ? _c : 0
+        added: (_d = (_c = file.stat) == null ? void 0 : _c.ctime) != null ? _d : 0
       };
     });
   }
@@ -21475,6 +21937,7 @@ var BookshelfView = class extends import_obsidian2.ItemView {
   }
   // ─── Book Spine Builder ───────────────────────────────────────────────────────
   buildBookSpine(book, animated, index) {
+    var _a;
     const { theme } = this.plugin.settings;
     const spineColor = this.resolveColor(book, theme);
     const isReading = book.status === "reading";
@@ -21511,6 +21974,32 @@ var BookshelfView = class extends import_obsidian2.ItemView {
       strip.setAttribute("role", "img");
       strip.setAttribute("aria-label", `${book.progress}% read`);
       bookEl.appendChild(strip);
+    }
+    if (this.plugin.settings.trackingEnabled) {
+      const heatDays = daysForBook(this.plugin.log, book.title);
+      if (heatDays.size > 0) {
+        const column = bookEl.createDiv({ cls: "book-heat" });
+        const today = todayKey();
+        const window2 = this.plugin.settings.heatDays;
+        for (let i = window2 - 1; i >= 0; i--) {
+          const date = addDays(today, -i);
+          const minutes = (_a = heatDays.get(date)) != null ? _a : 0;
+          const dot = column.createDiv({ cls: "heat-dot" });
+          const level = levelFor(minutes);
+          if (level > 0)
+            dot.addClass(`level-${level}`);
+          dot.setAttribute(
+            "title",
+            minutes > 0 ? `${date}: ${formatMinutes(minutes)}` : date
+          );
+        }
+      }
+      const streak = streakEndingOn(this.plugin.log, todayKey());
+      if (streak >= 2) {
+        const marker = bookEl.createDiv({ cls: "book-streak" });
+        marker.setAttribute("aria-label", `${streak} day streak`);
+        marker.textContent = String(streak);
+      }
     }
     const spine = document.createElement("div");
     spine.className = "book-spine-content";
@@ -21558,6 +22047,7 @@ var BookshelfView = class extends import_obsidian2.ItemView {
     }
     bookEl.addEventListener("click", () => {
       this.openBook(book);
+      this.showLogBar(book);
     });
     bookEl.setAttribute("tabindex", "0");
     bookEl.setAttribute("role", "button");
@@ -21566,7 +22056,12 @@ var BookshelfView = class extends import_obsidian2.ItemView {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         this.openBook(book);
+        this.showLogBar(book);
       }
+    });
+    bookEl.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      this.showBookMenu(e, book);
     });
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (!reducedMotion) {
@@ -21608,6 +22103,45 @@ var BookshelfView = class extends import_obsidian2.ItemView {
   openBook(book) {
     const leaf = this.app.workspace.getLeaf("split");
     void leaf.openFile(book.file);
+  }
+  /**
+   * The quick actions on a spine: log a session of a few common lengths,
+   * mark the book finished, or open it.
+   */
+  showBookMenu(e, book) {
+    const menu = new import_obsidian2.Menu();
+    const today = todayKey();
+    for (const minutes of [15, 30, 60]) {
+      menu.addItem(
+        (item) => item.setTitle(`Log ${minutes} minutes`).setIcon("clock").onClick(async () => {
+          await this.plugin.logSession({
+            book: book.title,
+            path: book.file.path,
+            date: today,
+            minutes
+          });
+          this.render();
+        })
+      );
+    }
+    menu.addSeparator();
+    const completed = this.plugin.settings.statuses.find(
+      (status) => status.name.toLowerCase() === "completed"
+    );
+    menu.addItem(
+      (item) => item.setTitle("Mark finished").setIcon("check").onClick(async () => {
+        var _a;
+        await this.writeBookState(book, {
+          status: (_a = completed == null ? void 0 : completed.name) != null ? _a : "completed",
+          rating: ""
+        });
+        this.render();
+      })
+    );
+    menu.addItem(
+      (item) => item.setTitle("Open note").setIcon("book-open").onClick(() => this.openBook(book))
+    );
+    menu.showAtMouseEvent(e);
   }
   // ─── Status Helpers ─────────────────────────────────────────────────────────
   statusColor(status) {
@@ -21783,6 +22317,52 @@ var BookshelfView = class extends import_obsidian2.ItemView {
     this.threeCamera = null;
   }
 };
+function formatMinutes(minutes) {
+  const total = Math.max(0, Math.round(minutes));
+  if (total < 60)
+    return `${total}m`;
+  const hours = Math.floor(total / 60);
+  const rest = total % 60;
+  return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
+}
+function bookshelfGlyph() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 48 40");
+  svg.setAttribute("width", "48");
+  svg.setAttribute("height", "40");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  const book = (x, width, height) => {
+    const rect = document.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "rect"
+    );
+    rect.setAttribute("x", String(x));
+    rect.setAttribute("y", String(36 - height));
+    rect.setAttribute("width", String(width));
+    rect.setAttribute("height", String(height));
+    rect.setAttribute("rx", "1.5");
+    svg.appendChild(rect);
+  };
+  book(6, 9, 22);
+  book(17, 7, 28);
+  book(26, 9, 18);
+  book(37, 5, 24);
+  const shelf = document.createElementNS(
+    "http://www.w3.org/2000/svg",
+    "line"
+  );
+  shelf.setAttribute("x1", "3");
+  shelf.setAttribute("y1", "36");
+  shelf.setAttribute("x2", "45");
+  shelf.setAttribute("y2", "36");
+  svg.appendChild(shelf);
+  return svg;
+}
 
 // main.ts
 var CinematicBookshelfPlugin = class extends import_obsidian3.Plugin {
@@ -21790,6 +22370,8 @@ var CinematicBookshelfPlugin = class extends import_obsidian3.Plugin {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
     this._debounceTimer = null;
+    /** The reading log, kept alongside the settings in the plugin's data. */
+    this.log = { sessions: [] };
   }
   async onload() {
     await this.loadSettings();
@@ -21831,14 +22413,54 @@ var CinematicBookshelfPlugin = class extends import_obsidian3.Plugin {
   }
   async loadSettings() {
     var _a;
-    const stored = (_a = await this.loadData()) != null ? _a : {};
+    const data = (_a = await this.loadData()) != null ? _a : {};
+    const stored = data;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
     if (!Array.isArray(stored.statuses) || stored.statuses.length === 0) {
       this.settings.statuses = DEFAULT_SETTINGS.statuses;
     }
+    this.log = readLog(data);
   }
   async saveSettings() {
-    await this.saveData(this.settings);
+    await this.saveData(writeLog({ ...this.settings }, this.log));
+  }
+  // ─── Reading log ──────────────────────────────────────────────────────────
+  /** Record a reading session and save it. */
+  async logSession(session) {
+    this.log = recordSession(this.log, session);
+    await this.saveSettings();
+  }
+  /** Drop every session for a book, used when its note goes away. */
+  async forgetBook(book) {
+    this.log = removeBook(this.log, book);
+    await this.saveSettings();
+  }
+  /** The key the log is stored under. */
+  static get logKey() {
+    return LOG_KEY;
+  }
+  /**
+   * Write the reading log to a file in the vault, so another tool can
+   * pick it up. The file is named with the date, so exports do not
+   * overwrite one another.
+   */
+  async exportLog() {
+    const json = exportLog(this.log);
+    const name = `reading-log-${todayKey()}.json`;
+    const path = (0, import_obsidian3.normalizePath)(name);
+    try {
+      const existing = this.app.vault.getAbstractFileByPath(path);
+      if (existing instanceof import_obsidian3.TFile) {
+        await this.app.vault.modify(existing, json);
+      } else {
+        await this.app.vault.create(path, json);
+      }
+      new import_obsidian3.Notice(`Reading log exported to ${path}`);
+    } catch (error) {
+      new import_obsidian3.Notice(
+        `Could not export the reading log: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
   // ─── View management ──────────────────────────────────────────────────────
   async activateView() {

@@ -1,4 +1,4 @@
-import { ItemView, normalizePath, type TFile } from "obsidian";
+import { ItemView, Menu, normalizePath, type TFile } from "obsidian";
 import { default as anime, type AnimeTimelineInstance } from "animejs";
 import {
     Scene,
@@ -15,7 +15,17 @@ import {
 
 import type CinematicBookshelfPlugin from "./main";
 import { type Theme, type SortOrder, type FilterMode, type StatusDefinition } from "./settings";
-import { parseColor, shiftLightness, shiftSaturation, hslToString, hashCode } from "./colour";
+import { parseColor, shiftLightness, hslToString, hashCode } from "./colour";
+import {
+    addDays,
+    currentStreak,
+    daysForBook,
+    heatmapByWeek,
+    levelFor,
+    minutesInWeekEnding,
+    streakEndingOn,
+    todayKey,
+} from "./log";
 
 export const VIEW_TYPE_BOOKSHELF = "cinematic-bookshelf-view";
 
@@ -52,6 +62,9 @@ export class BookshelfView extends ItemView {
 
     // ResizeObserver for three.js canvas
     private resizeObserver: ResizeObserver | null = null;
+
+    // The log bar, shown when a book is opened
+    private logBar: HTMLElement | null = null;
 
     // Search term, held outside the DOM so it survives a re-render
     private searchTerm = "";
@@ -123,6 +136,9 @@ export class BookshelfView extends ItemView {
         const rows = this.buildRows(visible);
 
         this.renderToolbar(shelf, allBooks.length, visible.length);
+        if (this.plugin.settings.trackingEnabled) {
+            this.renderSummary(shelf, visible);
+        }
 
         if (visible.length === 0) {
             this.renderEmptyState(shelf, allBooks.length);
@@ -175,6 +191,260 @@ export class BookshelfView extends ItemView {
         }
     }
 
+    // ─── Summary ───────────────────────────────────────────────────────────────
+
+    /**
+     * The strip above the shelf: the current streak, the minutes read this
+     * week, how many books are finished, and a heatmap of the last 52 weeks.
+     */
+    private renderSummary(shelf: HTMLElement, books: Book[]): void {
+        const log = this.plugin.log;
+        const today = todayKey();
+        const streak = currentStreak(log, today);
+        const weekMinutes = minutesInWeekEnding(log, today);
+        const finished = books.filter(
+            (book) => book.status?.toLowerCase() === "completed",
+        ).length;
+
+        const summary = shelf.createDiv({ cls: "reading-summary" });
+        const stats = summary.createDiv({ cls: "summary-stats" });
+
+        const streakStat = stats.createDiv({ cls: "summary-stat" });
+        streakStat.createEl("span", { cls: "stat-value", text: String(streak) });
+        streakStat.createEl("span", { cls: "stat-label", text: "day streak" });
+
+        const weekStat = stats.createDiv({ cls: "summary-stat" });
+        weekStat.createEl("span", {
+            cls: "stat-value",
+            text: formatMinutes(weekMinutes),
+        });
+        weekStat.createEl("span", { cls: "stat-label", text: "this week" });
+
+        const doneStat = stats.createDiv({ cls: "summary-stat" });
+        doneStat.createEl("span", { cls: "stat-value", text: String(finished) });
+        doneStat.createEl("span", { cls: "stat-label", text: "finished" });
+
+        // ── The heatmap: one column per week, like a contribution graph.
+        const weeks = heatmapByWeek(
+            log,
+            today,
+            this.plugin.settings.heatmapWeeks,
+        );
+        const map = summary.createDiv({ cls: "summary-heatmap" });
+        map.setAttribute("role", "img");
+        map.setAttribute(
+            "aria-label",
+            `Reading activity over the last ${this.plugin.settings.heatmapWeeks} weeks, ${streak} day streak`,
+        );
+        for (const week of weeks) {
+            const column = map.createDiv({ cls: "heat-week" });
+            for (const cell of week.days) {
+                const dot = column.createDiv({ cls: "heat-dot" });
+                if (cell.level > 0) dot.addClass(`level-${cell.level}`);
+                if (cell.date === today) dot.addClass("is-today");
+                dot.setAttribute(
+                    "title",
+                    `${cell.date}: ${formatMinutes(cell.minutes)}`,
+                );
+            }
+        }
+    }
+
+    // ─── The log bar ────────────────────────────────────────────────────────────
+
+    /**
+     * Show the log bar for a book.
+     *
+     * It appears over the shelf when a book is opened, so a session can be
+     * recorded without leaving the note. The bar takes the date, the minutes
+     * read, a status and a rating, and writes the status and rating into the
+     * note's own frontmatter.
+     */
+    private showLogBar(book: Book): void {
+        this.closeLogBar();
+
+        const bar = this.containerEl.createDiv({ cls: "log-bar" });
+        this.logBar = bar;
+
+        const header = bar.createDiv({ cls: "log-bar-header" });
+        header.createEl("span", { cls: "log-bar-title", text: book.title });
+
+        const close = header.createEl("button", {
+            cls: "log-bar-close",
+            text: "Close",
+            attr: { type: "button", "aria-label": "Close the log bar" },
+        });
+        close.addEventListener("click", () => this.closeLogBar());
+
+        // ── The form
+        const form = bar.createDiv({ cls: "log-bar-form" });
+
+        // Date, defaulting to today but editable so a past session can be
+        // logged.
+        const dateField = form.createDiv({ cls: "log-field" });
+        dateField.createEl("label", { text: "Date" });
+        const dateInput = dateField.createEl("input", {
+            cls: "log-input",
+            attr: { type: "date", "aria-label": "Reading date" },
+        });
+        dateInput.value = todayKey();
+
+        // Minutes.
+        const minutesField = form.createDiv({ cls: "log-field" });
+        minutesField.createEl("label", { text: "Minutes" });
+        const minutesInput = minutesField.createEl("input", {
+            cls: "log-input",
+            attr: {
+                type: "number",
+                min: "0",
+                max: "1440",
+                step: "5",
+                placeholder: "30",
+                "aria-label": "Minutes read",
+            },
+        });
+
+        // Status.
+        const statusField = form.createDiv({ cls: "log-field" });
+        statusField.createEl("label", { text: "Status" });
+        const statusSelect = statusField.createEl("select", {
+            cls: "log-input",
+            attr: { "aria-label": "Status" },
+        });
+        statusSelect.createEl("option", { text: "Unchanged", value: "" });
+        for (const status of this.plugin.settings.statuses) {
+            statusSelect.createEl("option", {
+                text: status.name,
+                value: status.name,
+            });
+        }
+        statusSelect.value = book.status ?? "";
+
+        // Rating.
+        const ratingField = form.createDiv({ cls: "log-field" });
+        ratingField.createEl("label", { text: "Rating" });
+        const ratingSelect = ratingField.createEl("select", {
+            cls: "log-input",
+            attr: { "aria-label": "Rating" },
+        });
+        ratingSelect.createEl("option", { text: "Unchanged", value: "" });
+        for (let i = 1; i <= 5; i++) {
+            ratingSelect.createEl("option", { text: String(i), value: String(i) });
+        }
+        ratingSelect.value = book.rating ? String(book.rating) : "";
+
+        // ── Actions
+        const actions = form.createDiv({ cls: "log-actions" });
+
+        const logButton = actions.createEl("button", {
+            cls: "mod-cta log-submit",
+            text: "Log",
+            attr: { type: "button" },
+        });
+        logButton.addEventListener("click", async () => {
+            const minutes = Number(minutesInput.value);
+            const date = dateInput.value;
+
+            if (Number.isFinite(minutes) && minutes > 0 && date) {
+                await this.plugin.logSession({
+                    book: book.title,
+                    path: book.file.path,
+                    date,
+                    minutes,
+                });
+                await this.writeBookState(book, {
+                    status: statusSelect.value,
+                    rating: ratingSelect.value,
+                    date,
+                });
+                this.closeLogBar();
+                this.render();
+                return;
+            }
+
+            // Nothing to log, but the status or rating may still have changed.
+            await this.writeBookState(book, {
+                status: statusSelect.value,
+                rating: ratingSelect.value,
+            });
+            this.closeLogBar();
+            this.render();
+        });
+
+        const finishButton = actions.createEl("button", {
+            cls: "log-finish",
+            text: "Mark finished",
+            attr: { type: "button" },
+        });
+        finishButton.addEventListener("click", async () => {
+            const completed = this.plugin.settings.statuses.find(
+                (status) => status.name.toLowerCase() === "completed",
+            );
+            await this.writeBookState(book, {
+                status: completed?.name ?? "completed",
+                rating: ratingSelect.value,
+            });
+            this.closeLogBar();
+            this.render();
+        });
+
+        // A quick log without opening the note.
+        const quick = bar.createDiv({ cls: "log-quick" });
+        quick.createEl("span", { cls: "log-quick-label", text: "Quick log" });
+        for (const minutes of [15, 30, 60]) {
+            const button = quick.createEl("button", {
+                cls: "log-quick-button",
+                text: `${minutes}m`,
+                attr: { type: "button" },
+            });
+            button.addEventListener("click", async () => {
+                await this.plugin.logSession({
+                    book: book.title,
+                    path: book.file.path,
+                    date: todayKey(),
+                    minutes,
+                });
+                await this.writeBookState(book, {
+                    status: statusSelect.value,
+                    rating: ratingSelect.value,
+                });
+                this.closeLogBar();
+                this.render();
+            });
+        }
+    }
+
+    private closeLogBar(): void {
+        if (this.logBar) {
+            this.logBar.remove();
+            this.logBar = null;
+        }
+    }
+
+    /**
+     * Write the status, rating and last-read date into the note's
+     * frontmatter, leaving the body untouched.
+     */
+    private async writeBookState(
+        book: Book,
+        state: { status: string; rating: string; date?: string },
+    ): Promise<void> {
+        const status = state.status;
+        const rating = state.rating;
+
+        await this.app.fileManager.processFrontMatter(book.file, (frontmatter) => {
+            if (status) {
+                frontmatter.status = status;
+            }
+            if (rating) {
+                frontmatter.rating = Number(rating);
+            }
+            if (state.date) {
+                frontmatter.lastRead = state.date;
+            }
+        });
+    }
+
     // ─── Toolbar ────────────────────────────────────────────────────────────────
 
     private renderToolbar(
@@ -187,7 +457,7 @@ export class BookshelfView extends ItemView {
         const header = shelf.createDiv({ cls: "bookshelf-header" });
 
         const titleGroup = header.createDiv({ cls: "header-titles" });
-        titleGroup.createEl("h2", { text: "📚 Cinematic Bookshelf" });
+        titleGroup.createEl("h2", { text: "Cinematic Bookshelf" });
         titleGroup.createEl("span", {
             cls: "book-count",
             text:
@@ -200,7 +470,8 @@ export class BookshelfView extends ItemView {
 
         // ── Search
         const searchWrap = controls.createDiv({ cls: "search-wrap" });
-        searchWrap.createEl("span", { cls: "search-icon", text: "🔍" });
+        // The magnifier is drawn in CSS, so no icon font or emoji is needed.
+        searchWrap.createEl("span", { cls: "search-icon" });
         const search = searchWrap.createEl("input", {
             cls: "shelf-search",
             attr: {
@@ -276,7 +547,7 @@ export class BookshelfView extends ItemView {
 
     private renderEmptyState(shelf: HTMLElement, total: number): void {
         const empty = shelf.createDiv({ cls: "bookshelf-empty" });
-        empty.createEl("div", { cls: "empty-icon", text: "📚" });
+        empty.createDiv({ cls: "empty-icon" }).appendChild(bookshelfGlyph());
         empty.createEl("h3", {
             text: total === 0 ? "Your shelf is empty" : "Nothing matches",
         });
@@ -335,7 +606,15 @@ export class BookshelfView extends ItemView {
                 return {
                     file,
                     title: fm.title || file.basename,
-                    author: fm.author,
+                    // Some notes carry `authors` rather than `author`, so
+                    // both are accepted, with `author` taking priority.
+                    author:
+                        fm.author ??
+                        (typeof fm.authors === "string"
+                            ? fm.authors
+                            : Array.isArray(fm.authors)
+                              ? fm.authors.join(", ")
+                              : undefined),
                     status: fm.status,
                     rating:
                         typeof fm.rating === "number"
@@ -533,6 +812,38 @@ export class BookshelfView extends ItemView {
             bookEl.appendChild(strip);
         }
 
+        // The heat dots: one per day this book was read, over the configured
+        // window, shaded by how long each session was.
+        if (this.plugin.settings.trackingEnabled) {
+            const heatDays = daysForBook(this.plugin.log, book.title);
+            if (heatDays.size > 0) {
+                const column = bookEl.createDiv({ cls: "book-heat" });
+                const today = todayKey();
+                const window = this.plugin.settings.heatDays;
+                for (let i = window - 1; i >= 0; i--) {
+                    const date = addDays(today, -i);
+                    const minutes = heatDays.get(date) ?? 0;
+                    const dot = column.createDiv({ cls: "heat-dot" });
+                    const level = levelFor(minutes);
+                    if (level > 0) dot.addClass(`level-${level}`);
+                    dot.setAttribute(
+                        "title",
+                        minutes > 0
+                            ? `${date}: ${formatMinutes(minutes)}`
+                            : date,
+                    );
+                }
+            }
+
+            // A marker when the book has been read on consecutive days.
+            const streak = streakEndingOn(this.plugin.log, todayKey());
+            if (streak >= 2) {
+                const marker = bookEl.createDiv({ cls: "book-streak" });
+                marker.setAttribute("aria-label", `${streak} day streak`);
+                marker.textContent = String(streak);
+            }
+        }
+
         const spine = document.createElement("div");
         spine.className = "book-spine-content";
 
@@ -586,6 +897,7 @@ export class BookshelfView extends ItemView {
 
         bookEl.addEventListener("click", () => {
             this.openBook(book);
+            this.showLogBar(book);
         });
         bookEl.setAttribute("tabindex", "0");
         bookEl.setAttribute("role", "button");
@@ -594,7 +906,15 @@ export class BookshelfView extends ItemView {
             if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
                 this.openBook(book);
+                this.showLogBar(book);
             }
+        });
+
+        // A right click gives the quick actions, so a session can be logged
+        // without opening the note.
+        bookEl.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+            this.showBookMenu(e, book);
         });
 
         const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -639,6 +959,59 @@ export class BookshelfView extends ItemView {
     private openBook(book: Book): void {
         const leaf = this.app.workspace.getLeaf("split");
         void leaf.openFile(book.file);
+    }
+
+    /**
+     * The quick actions on a spine: log a session of a few common lengths,
+     * mark the book finished, or open it.
+     */
+    private showBookMenu(e: MouseEvent, book: Book): void {
+        const menu = new Menu();
+        const today = todayKey();
+
+        for (const minutes of [15, 30, 60]) {
+            menu.addItem((item) =>
+                item
+                    .setTitle(`Log ${minutes} minutes`)
+                    .setIcon("clock")
+                    .onClick(async () => {
+                        await this.plugin.logSession({
+                            book: book.title,
+                            path: book.file.path,
+                            date: today,
+                            minutes,
+                        });
+                        this.render();
+                    }),
+            );
+        }
+
+        menu.addSeparator();
+
+        const completed = this.plugin.settings.statuses.find(
+            (status) => status.name.toLowerCase() === "completed",
+        );
+        menu.addItem((item) =>
+            item
+                .setTitle("Mark finished")
+                .setIcon("check")
+                .onClick(async () => {
+                    await this.writeBookState(book, {
+                        status: completed?.name ?? "completed",
+                        rating: "",
+                    });
+                    this.render();
+                }),
+        );
+
+        menu.addItem((item) =>
+            item
+                .setTitle("Open note")
+                .setIcon("book-open")
+                .onClick(() => this.openBook(book)),
+        );
+
+        menu.showAtMouseEvent(e);
     }
 
     // ─── Status Helpers ─────────────────────────────────────────────────────────
@@ -853,4 +1226,66 @@ export class BookshelfView extends ItemView {
 
         this.threeCamera = null;
     }
+}
+
+/**
+ * A readable duration: minutes under an hour, then hours and minutes.
+ */
+export function formatMinutes(minutes: number): string {
+    const total = Math.max(0, Math.round(minutes));
+    if (total < 60) return `${total}m`;
+    const hours = Math.floor(total / 60);
+    const rest = total % 60;
+    return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
+}
+
+/**
+ * A small bookshelf drawn as an SVG, used for the empty state.
+ *
+ * Drawing it rather than using an emoji keeps the plugin free of image
+ * dependencies and lets the glyph take the theme's own colour.
+ */
+function bookshelfGlyph(): SVGElement {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 48 40");
+    svg.setAttribute("width", "48");
+    svg.setAttribute("height", "40");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("aria-hidden", "true");
+
+    // Four books of different heights, standing on a shelf.
+    const book = (x: number, width: number, height: number) => {
+        const rect = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "rect",
+        );
+        rect.setAttribute("x", String(x));
+        rect.setAttribute("y", String(36 - height));
+        rect.setAttribute("width", String(width));
+        rect.setAttribute("height", String(height));
+        rect.setAttribute("rx", "1.5");
+        svg.appendChild(rect);
+    };
+
+    book(6, 9, 22);
+    book(17, 7, 28);
+    book(26, 9, 18);
+    book(37, 5, 24);
+
+    // The shelf itself.
+    const shelf = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "line",
+    );
+    shelf.setAttribute("x1", "3");
+    shelf.setAttribute("y1", "36");
+    shelf.setAttribute("x2", "45");
+    shelf.setAttribute("y2", "36");
+    svg.appendChild(shelf);
+
+    return svg;
 }

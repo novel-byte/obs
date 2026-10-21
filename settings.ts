@@ -4,13 +4,14 @@ import { App, Plugin, PluginSettingTab, Setting } from "obsidian";
  * Minimal interface for what BookshelfSettingTab needs from the plugin.
  * Extends Plugin so it satisfies PluginSettingTab's super(app, plugin) call.
  * Using an interface here instead of importing from ./main breaks the
- * circular dependency (settings.ts ↔ main.ts) and eliminates IDE false-positives.
+ * circular dependency (settings.ts and main.ts) and eliminates IDE false-positives.
  */
 interface IBookshelfPlugin extends Plugin {
     settings: BookshelfSettings;
     saveSettings(): Promise<void>;
     refreshView(): void;
     debouncedRefresh(): void;
+    exportLog(): Promise<void>;
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -43,6 +44,12 @@ export interface BookshelfSettings {
     glassEnabled: boolean;
     /** Let the shelf follow the Obsidian theme's own colours. */
     followObsidianTheme: boolean;
+    /** Show the reading tracker: streaks, heatmaps and the log bar. */
+    trackingEnabled: boolean;
+    /** How many days of per-book activity the heat dots cover. */
+    heatDays: number;
+    /** How many weeks the summary heatmap covers. */
+    heatmapWeeks: number;
 }
 
 export const DEFAULT_SETTINGS: BookshelfSettings = {
@@ -61,6 +68,9 @@ export const DEFAULT_SETTINGS: BookshelfSettings = {
     ],
     glassEnabled: true,
     followObsidianTheme: true,
+    trackingEnabled: true,
+    heatDays: 30,
+    heatmapWeeks: 52,
 };
 
 // ─── Settings Tab ─────────────────────────────────────────────────────────────
@@ -78,7 +88,7 @@ export class BookshelfSettingTab extends PluginSettingTab {
         containerEl.empty();
 
         // ── Header
-        containerEl.createEl("h2", { text: "📚 Cinematic Bookshelf" });
+        containerEl.createEl("h2", { text: "Cinematic Bookshelf" });
         containerEl.createEl("p", {
             text: "Configure your animated bookshelf experience.",
             cls: "setting-item-description",
@@ -88,14 +98,14 @@ export class BookshelfSettingTab extends PluginSettingTab {
 
         // ── Theme
         new Setting(containerEl)
-            .setName("🎨 Theme")
+            .setName("Theme")
             .setDesc(
                 "Choose your bookshelf aesthetic. Cozy uses warm wood tones; Cybersigilism uses matte black with neon glow."
             )
             .addDropdown((drop) =>
                 drop
-                    .addOption("cozy", "🌲 Cozy — Warm & Wooden")
-                    .addOption("cybersigilism", "🧿 Cybersigilism — Neon & Dark")
+                    .addOption("cozy", "Cozy — Warm & Wooden")
+                    .addOption("cybersigilism", "Cybersigilism — Neon & Dark")
                     .setValue(this.plugin.settings.theme)
                     .onChange(async (value: string) => {
                         this.plugin.settings.theme = value as Theme;
@@ -106,7 +116,7 @@ export class BookshelfSettingTab extends PluginSettingTab {
 
         // ── Folder Path
         new Setting(containerEl)
-            .setName("📁 Books folder")
+            .setName("Books folder")
             .setDesc(
                 "Path to the folder containing your book notes, relative to the vault root. Example: Books or Reading/Library. Leave empty to use the tag alone."
             )
@@ -123,7 +133,7 @@ export class BookshelfSettingTab extends PluginSettingTab {
 
         // ── Tag
         new Setting(containerEl)
-            .setName("🏷️ Book tag")
+            .setName("Book tag")
             .setDesc(
                 "Tag used to identify a book note (without #). Notes with this tag anywhere in the vault will appear on the shelf."
             )
@@ -141,7 +151,7 @@ export class BookshelfSettingTab extends PluginSettingTab {
 
         // ── Sort order
         new Setting(containerEl)
-            .setName("🔢 Sort by")
+            .setName("Sort by")
             .setDesc("The order books appear along the shelf.")
             .addDropdown((drop) =>
                 drop
@@ -160,7 +170,7 @@ export class BookshelfSettingTab extends PluginSettingTab {
 
         // ── Filter
         new Setting(containerEl)
-            .setName("🔍 Show")
+            .setName("Show")
             .setDesc("Which books are on the shelf.")
             .addDropdown((drop) =>
                 drop
@@ -178,7 +188,7 @@ export class BookshelfSettingTab extends PluginSettingTab {
 
         // ── Group by series
         new Setting(containerEl)
-            .setName("📚 Group by series")
+            .setName("Group by series")
             .setDesc(
                 "Give books sharing a `series` frontmatter their own row, in the order the `position` field gives."
             )
@@ -194,7 +204,7 @@ export class BookshelfSettingTab extends PluginSettingTab {
 
         // ── Glass
         new Setting(containerEl)
-            .setName("🪟 Frosted glass")
+            .setName("Frosted glass")
             .setDesc(
                 "Draw the spines as frosted panels over the background. Turn off for a solid shelf."
             )
@@ -208,9 +218,77 @@ export class BookshelfSettingTab extends PluginSettingTab {
                     })
             );
 
+        // ── Tracking
+        containerEl.createEl("h3", { text: "Reading tracker" });
+        containerEl.createEl("p", {
+            text: "Record what you read, and see your streaks and activity.",
+            cls: "setting-item-description",
+        });
+
+        new Setting(containerEl)
+            .setName("Track reading")
+            .setDesc(
+                "Log a session from the shelf, and show streaks, per-book activity and the weekly heatmap."
+            )
+            .addToggle((toggle) =>
+                toggle
+                    .setValue(this.plugin.settings.trackingEnabled)
+                    .onChange(async (value: boolean) => {
+                        this.plugin.settings.trackingEnabled = value;
+                        await this.plugin.saveSettings();
+                        this.plugin.refreshView();
+                    })
+            );
+
+        new Setting(containerEl)
+            .setName("Days of activity per book")
+            .setDesc(
+                "How many days of reading the dots down the side of each spine cover."
+            )
+            .addSlider((slider) =>
+                slider
+                    .setLimits(7, 90, 1)
+                    .setDynamicTooltip()
+                    .setValue(this.plugin.settings.heatDays)
+                    .onChange(async (value: number) => {
+                        this.plugin.settings.heatDays = value;
+                        await this.plugin.saveSettings();
+                        this.plugin.refreshView();
+                    }),
+            );
+
+        new Setting(containerEl)
+            .setName("Weeks in the heatmap")
+            .setDesc(
+                "How many weeks the heatmap above the shelf covers. 52 is a year."
+            )
+            .addSlider((slider) =>
+                slider
+                    .setLimits(4, 104, 1)
+                    .setDynamicTooltip()
+                    .setValue(this.plugin.settings.heatmapWeeks)
+                    .onChange(async (value: number) => {
+                        this.plugin.settings.heatmapWeeks = value;
+                        await this.plugin.saveSettings();
+                        this.plugin.refreshView();
+                    }),
+            );
+
+        // ── Export
+        new Setting(containerEl)
+            .setName("Export the reading log")
+            .setDesc(
+                "Write every logged session to a JSON file, so another tool can pick up your reading history."
+            )
+            .addButton((button) =>
+                button.setButtonText("Export").onClick(async () => {
+                    await this.plugin.exportLog();
+                }),
+            );
+
         // ── Follow the Obsidian theme
         new Setting(containerEl)
-            .setName("🎛️ Follow the Obsidian theme")
+            .setName("Follow the Obsidian theme")
             .setDesc(
                 "Take the base colours from Obsidian's own theme, so the shelf fits whichever theme you use."
             )
@@ -226,7 +304,7 @@ export class BookshelfSettingTab extends PluginSettingTab {
 
         // ── Animations Toggle
         new Setting(containerEl)
-            .setName("✨ Enable animations")
+            .setName("Enable animations")
             .setDesc(
                 "Toggle staggered entrance animations and hover effects. Disable for accessibility or performance."
             )

@@ -27,7 +27,7 @@ locally:
    the file Obsidian loads.
 3. Copy `main.js`, `manifest.json` and `styles.css` into
    `<vault>/.obsidian/plugins/cinematic-bookshelf/`.
-4. Enable **Cinematic Bookshelf** under *Settings → Community plugins*.
+4. Enable **Cinematic Bookshelf** under *Settings > Community plugins*.
 
 Rebuild after any change with `npm run dev`, which watches the source and
 rebuilds on save.
@@ -104,7 +104,7 @@ series.
 | **Enable animations** | on | Turns the entrance and hover animations off. |
 | **Statuses** | reading, completed, paused, abandoned | The statuses a note can carry, and the colour each is drawn in. Add your own, or remove ones you do not use. |
 
-Settings live under *Settings → Cinematic Bookshelf*.
+Settings live under *Settings > Cinematic Bookshelf*.
 
 ## Accessibility
 
