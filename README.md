@@ -99,12 +99,57 @@ series.
 | **Sort by** | Title | The order the books appear in. |
 | **Show** | All books | Which books are on the shelf. |
 | **Group by series** | on | Give books sharing a `series` their own row. |
+| **Track reading** | on | Log sessions from the shelf, and show streaks, per-book activity and the weekly heatmap. |
+| **Days of activity per book** | 30 | How many days the dots down a spine cover. |
+| **Weeks in the heatmap** | 52 | How many weeks the heatmap above the shelf covers. 52 is a year. |
 | **Frosted glass** | on | Draw the spines as frosted panels. Turn off for a solid shelf. |
 | **Follow the Obsidian theme** | on | Take the base colours from Obsidian's own theme. |
 | **Enable animations** | on | Turns the entrance and hover animations off. |
 | **Statuses** | reading, completed, paused, abandoned | The statuses a note can carry, and the colour each is drawn in. Add your own, or remove ones you do not use. |
 
 Settings live under *Settings > Cinematic Bookshelf*.
+
+## Tracking what you read
+
+The shelf is also a reading tracker. Click a spine and a **log bar** appears
+over the shelf, where you record the session.
+
+**Logging a session.** Enter the minutes read, pick a status, set a rating,
+and press **Log**. The date defaults to today but can be set to a past day, so
+a session from a paper book read last Tuesday can be logged afterwards.
+
+**Quick log.** Right-click a spine for a menu offering 15, 30 or 60 minutes,
+*Mark finished*, and *Open note* — all without opening the note.
+
+**What gets written where.** The status, rating and last-read date go into the
+note's own frontmatter, so they travel with the note:
+
+```yaml
+---
+title: "The Pragmatic Programmer"
+status: reading
+rating: 5
+lastRead: 2026-10-20
+---
+```
+
+The sessions themselves are kept in the plugin's own data file, so they never
+clutter your notes. Obsidian backs that file up along with the vault.
+
+**What the shelf then shows.**
+
+- **A summary strip above the shelf** — the current streak in days, the
+  minutes read this week, how many books are finished, and a **52-week
+  heatmap** in the shape of a contribution graph.
+- **Heat dots down each spine** — one per day you read that book, over the
+  last 30 days, shaded by how long each session was.
+- **A streak marker** on a spine you have read on consecutive days.
+
+### Exporting
+
+*Settings > Cinematic Bookshelf > Export the reading log* writes every logged
+session to a JSON file in the vault, with per-book totals. Another tool can
+pick up your reading history from it.
 
 ## Accessibility
 
@@ -118,7 +163,11 @@ Settings live under *Settings > Cinematic Bookshelf*.
 - Opening a book splits it into a new pane rather than replacing the shelf, so
   the shelf stays in view.
 - The progress fill carries an `aria-label` with the percentage, the status
-  badge one with the status, and the rating one with the score.
+  badge one with the status, the rating one with the score, and the heatmap
+  one describing the whole year.
+- The summary heatmap is a single image with a label, so a screen reader
+  hears "Reading activity over the last 52 weeks, 3 day streak" rather than
+  364 empty cells.
 
 ## How it works
 
@@ -152,7 +201,7 @@ npm run typecheck
 ```
 
 The build uses [esbuild](https://esbuild.github.io/) and bundles `main.ts`,
-which pulls in `bookshelfView.ts`, `settings.ts` and `colour.ts`. Three.js and
+which pulls in `bookshelfView.ts`, `settings.ts`, `colour.ts` and `log.ts`. Three.js and
 anime.js are bundled in; `obsidian` is left external, since Obsidian provides
 it at runtime.
 
@@ -162,9 +211,11 @@ it at runtime.
 | `bookshelfView.ts` | The view: the Three.js scene, the spine builder, the toolbar, and the book data pipeline. |
 | `settings.ts` | The settings tab, the settings type, and the status list. |
 | `colour.ts` | Colour parsing and the deterministic hash used for spine heights and colours. |
+| `log.ts` | The reading log: sessions, streaks, heatmaps and the export. |
 | `main.js` | The bundled output Obsidian loads. Committed so the plugin can be installed without a build step. |
 | `styles.css` | The shelf styling, with the two themes as variable blocks. |
 | `esbuild.config.mjs` | The build configuration. |
+| `test-log.ts` | Tests for the reading log. Run with `node --test test-log.ts`. |
 
 ## Licence
 
